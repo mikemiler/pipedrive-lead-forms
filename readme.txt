@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.0.1
+Stable tag: 1.0.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -27,7 +27,7 @@ Updates are delivered via GitHub, not wordpress.org.
 
 == Changelog ==
 
-= 1.0.1 =
+= 1.0.2 =
 * Security audit pass: verified nonces, capability checks, input sanitization, output escaping and prepared SQL across the plugin. No vulnerabilities found.
 * Hardening: documented the safe, constant table name database queries and other deliberate exceptions with justified phpcs annotations.
 * Tooling: added a WordPress-Extra phpcs ruleset, composer dev dependencies and a GitHub Actions lint workflow so coding standards are enforced on every push. No functional changes for site visitors.
