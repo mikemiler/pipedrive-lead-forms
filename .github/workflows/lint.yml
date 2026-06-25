@@ -1,0 +1,31 @@
+name: Lint
+
+# Enforce WordPress coding + security standards (phpcs) on every push and PR.
+# The ruleset lives in phpcs.xml.dist; the gate fails on errors, warnings are
+# reported but non-blocking (ignore_warnings_on_exit in the ruleset).
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+jobs:
+  phpcs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          tools: composer
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run phpcs
+        run: composer lint

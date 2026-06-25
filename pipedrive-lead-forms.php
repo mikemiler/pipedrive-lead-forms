@@ -118,6 +118,7 @@ function pdlead_cron_schedules( $schedules ) {
 	);
 	return $schedules;
 }
+// phpcs:ignore WordPress.WP.CronInterval.CronSchedulesInterval -- 5-minute retry cadence is intentional for timely lead delivery.
 add_filter( 'cron_schedules', 'pdlead_cron_schedules' );
 
 // Boot the plugin.

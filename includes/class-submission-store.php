@@ -123,10 +123,11 @@ class Pdlead_Submission_Store {
 	public static function get( $id ) {
 		global $wpdb;
 		$row = $wpdb->get_row(
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table() is a constant table name; the value is prepared.
 			$wpdb->prepare( 'SELECT * FROM ' . self::table() . ' WHERE id = %d', $id ),
 			ARRAY_A
 		);
-		return $row ?: null;
+		return $row ? $row : null;
 	}
 
 	/**
@@ -179,15 +180,16 @@ class Pdlead_Submission_Store {
 		global $wpdb;
 		$now = current_time( 'mysql', true );
 
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- table() is a constant table name; all values are prepared.
 		$sql = $wpdb->prepare(
-			'SELECT * FROM ' . self::table() . "
+			'SELECT * FROM ' . self::table() . '
 			WHERE attempts < %d
 			AND (
 				( status = %s AND ( next_attempt_at IS NULL OR next_attempt_at <= %s ) )
 				OR ( status = %s AND next_attempt_at <= %s )
 			)
 			ORDER BY id ASC
-			LIMIT %d",
+			LIMIT %d',
 			$max_attempts,
 			self::STATUS_PENDING,
 			$now,
@@ -197,7 +199,8 @@ class Pdlead_Submission_Store {
 		);
 
 		$rows = $wpdb->get_results( $sql, ARRAY_A );
-		return $rows ?: array();
+		// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared
+		return $rows ? $rows : array();
 	}
 
 	/**
@@ -217,6 +220,7 @@ class Pdlead_Submission_Store {
 
 		$affected = $wpdb->query(
 			$wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table comes from the constant table() name; all values are prepared.
 				"UPDATE {$table}
 				SET status = %s, next_attempt_at = %s
 				WHERE id = %d
@@ -273,11 +277,13 @@ class Pdlead_Submission_Store {
 
 		$where_sql = implode( ' AND ', $where );
 
-		// Total count.
+		// Total count. $where_sql is built only from the hardcoded clauses above; all values are bound via $params.
 		$count_sql = 'SELECT COUNT(*) FROM ' . self::table() . " WHERE {$where_sql}";
 		if ( $params ) {
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- placeholders come from constant clauses; values are bound.
 			$count_sql = $wpdb->prepare( $count_sql, $params );
 		}
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $count_sql is prepared (or a constant query with no user input).
 		$total = (int) $wpdb->get_var( $count_sql );
 
 		// Page of rows.
@@ -286,10 +292,11 @@ class Pdlead_Submission_Store {
 
 		$rows_sql      = 'SELECT * FROM ' . self::table() . " WHERE {$where_sql} ORDER BY id DESC LIMIT %d OFFSET %d";
 		$rows_params   = array_merge( $params, array( $per_page, $offset ) );
-		$rows          = $wpdb->get_results( $wpdb->prepare( $rows_sql, $rows_params ), ARRAY_A );
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table() and $where_sql clauses are constants; all values are bound.
+		$rows = $wpdb->get_results( $wpdb->prepare( $rows_sql, $rows_params ), ARRAY_A );
 
 		return array(
-			'rows'  => $rows ?: array(),
+			'rows'  => $rows ? $rows : array(),
 			'total' => $total,
 		);
 	}
@@ -311,15 +318,18 @@ class Pdlead_Submission_Store {
 		// created_at is stored in UTC, so compare against a UTC cutoff.
 		$cutoff = gmdate( 'Y-m-d H:i:s', time() - ( $days * DAY_IN_SECONDS ) );
 
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- table() is a constant table name; all values are prepared.
 		$sql = $wpdb->prepare(
-			'DELETE FROM ' . self::table() . "
+			'DELETE FROM ' . self::table() . '
 			WHERE created_at < %s
-			AND status IN ( %s, %s )",
+			AND status IN ( %s, %s )',
 			$cutoff,
 			self::STATUS_SENT,
 			self::STATUS_SPAM
 		);
 
-		return (int) $wpdb->query( $sql );
+		$result = (int) $wpdb->query( $sql );
+		// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared
+		return $result;
 	}
 }

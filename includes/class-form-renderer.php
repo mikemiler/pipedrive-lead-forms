@@ -93,6 +93,7 @@ class Pdlead_Form_Renderer {
 		wp_enqueue_script( 'pdlead-form' );
 
 		if ( Pdlead_Settings::get( 'turnstile_enabled' ) && Pdlead_Settings::get( 'turnstile_site_key' ) ) {
+			// phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion -- third-party CDN script; versioning is managed by Cloudflare, not us.
 			wp_enqueue_script( 'pdlead-turnstile', 'https://challenges.cloudflare.com/turnstile/v0/api.js', array(), null, true );
 		}
 

@@ -197,7 +197,7 @@ class Pdlead_Bot_Guard {
 			);
 		}
 
-		$bucket['count']++;
+		++$bucket['count'];
 		set_transient( $key, $bucket, $window );
 
 		return $bucket['count'] > $max;

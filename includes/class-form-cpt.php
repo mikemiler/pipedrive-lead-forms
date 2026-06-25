@@ -279,9 +279,9 @@ class Pdlead_Form_CPT {
 	 * Persist field configuration on save.
 	 *
 	 * @param int     $post_id Post ID.
-	 * @param WP_Post $post    Post object.
+	 * @param WP_Post $post    Post object (unused; required by the save_post hook signature).
 	 */
-	public static function save( $post_id, $post ) {
+	public static function save( $post_id, $post ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- $post is part of the save_post callback contract.
 		// Verify nonce.
 		if ( ! isset( $_POST['pdlead_fields_nonce'] ) || ! wp_verify_nonce( sanitize_key( wp_unslash( $_POST['pdlead_fields_nonce'] ) ), 'pdlead_save_fields' ) ) {
 			return;
@@ -331,7 +331,7 @@ class Pdlead_Form_CPT {
 			$n    = 2;
 			while ( isset( $used_keys[ $key ] ) ) {
 				$key = $base . '_' . $n;
-				$n++;
+				++$n;
 			}
 			$used_keys[ $key ] = true;
 

@@ -239,18 +239,34 @@ class Pdlead_Admin_Settings {
 				__( 'Connected as %s.', 'pipedrive-lead-forms' ),
 				$name
 			) : __( 'Connection successful.', 'pipedrive-lead-forms' );
-			set_transient( 'pdlead_test_result', array( 'ok' => true, 'message' => $message ), 60 );
+			set_transient(
+				'pdlead_test_result',
+				array(
+					'ok' => true,
+					'message' => $message,
+				),
+				60
+			);
 		} else {
-			set_transient( 'pdlead_test_result', array( 'ok' => false, 'message' => $res['error'] ), 60 );
+			set_transient(
+				'pdlead_test_result',
+				array(
+					'ok' => false,
+					'message' => $res['error'],
+				),
+				60
+			);
 		}
 
-		wp_safe_redirect( add_query_arg(
-			array(
-				'post_type' => PDLEAD_CPT,
-				'page'      => self::PAGE,
-			),
-			admin_url( 'edit.php' )
-		) );
+		wp_safe_redirect(
+			add_query_arg(
+				array(
+					'post_type' => PDLEAD_CPT,
+					'page'      => self::PAGE,
+				),
+				admin_url( 'edit.php' )
+			)
+		);
 		exit;
 	}
 

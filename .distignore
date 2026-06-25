@@ -19,3 +19,9 @@ Thumbs.db
 # Developer-only docs (kept in the repo, but not part of the plugin)
 CLAUDE.md
 RELEASING.md
+
+# Dev-only tooling (phpcs / composer): never part of the shipped plugin
+composer.json
+composer.lock
+phpcs.xml.dist
+vendor

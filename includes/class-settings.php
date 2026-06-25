@@ -58,16 +58,16 @@ class Pdlead_Settings {
 	/**
 	 * Get a single setting value.
 	 *
-	 * @param string $key     Setting key.
-	 * @param mixed  $default Fallback if not set.
+	 * @param string $key      Setting key.
+	 * @param mixed  $fallback Fallback if not set.
 	 * @return mixed
 	 */
-	public static function get( $key, $default = null ) {
+	public static function get( $key, $fallback = null ) {
 		$all = self::all();
 		if ( array_key_exists( $key, $all ) ) {
 			return $all[ $key ];
 		}
-		return $default;
+		return $fallback;
 	}
 
 	/**

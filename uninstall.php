@@ -13,8 +13,8 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 global $wpdb;
 
 // Drop the submissions table (contains PII).
-$table = $wpdb->prefix . 'pdlead_submissions';
-$wpdb->query( "DROP TABLE IF EXISTS {$table}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery
+$pdlead_table = $wpdb->prefix . 'pdlead_submissions';
+$wpdb->query( "DROP TABLE IF EXISTS {$pdlead_table}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery -- table name from $wpdb->prefix, no user input.
 
 // Remove plugin options.
 delete_option( 'pdlead_settings' );
@@ -22,7 +22,7 @@ delete_option( 'pdlead_db_version' );
 delete_option( 'pdlead_hmac_secret' );
 
 // Remove form definitions and their meta.
-$forms = get_posts(
+$pdlead_forms = get_posts(
 	array(
 		'post_type'      => 'pdlead_form',
 		'post_status'    => 'any',
@@ -30,8 +30,8 @@ $forms = get_posts(
 		'fields'         => 'ids',
 	)
 );
-foreach ( $forms as $form_id ) {
-	wp_delete_post( $form_id, true );
+foreach ( $pdlead_forms as $pdlead_form_id ) {
+	wp_delete_post( $pdlead_form_id, true );
 }
 
 // Clear scheduled events.

@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<ruleset name="Pipedrive Lead Forms">
+	<description>WordPress coding + security standards for the Pipedrive Lead Forms plugin.</description>
+
+	<!-- Scan the plugin's own code. -->
+	<file>.</file>
+
+	<!-- Third-party / generated / non-PHP assets stay out of the scan. -->
+	<exclude-pattern>*/lib/*</exclude-pattern>
+	<exclude-pattern>*/vendor/*</exclude-pattern>
+	<exclude-pattern>*/assets/*</exclude-pattern>
+	<exclude-pattern>*/build/*</exclude-pattern>
+
+	<!-- Only sniff PHP. -->
+	<arg name="extensions" value="php"/>
+	<arg name="basepath" value="."/>
+	<arg name="colors"/>
+	<arg name="parallel" value="8"/>
+	<arg value="ps"/>
+
+	<!-- CI gate fails on errors; warnings are reported but non-blocking. -->
+	<config name="ignore_warnings_on_exit" value="1"/>
+
+	<!-- Core + best-practice + security sniffs (no Docs block standard). -->
+	<rule ref="WordPress-Extra">
+		<!-- Class files are intentionally named class-{short}.php, not the
+		     class-pdlead-{...}.php the sniff expects. Renaming would break the
+		     require_once bootstrap; keep the existing names. -->
+		<exclude name="WordPress.Files.FileName.InvalidClassFileName"/>
+		<!-- Statement/array alignment is cosmetic; let phpcbf handle it without
+		     failing the build. -->
+		<exclude name="Generic.Formatting.MultipleStatementAlignment.NotSameWarning"/>
+		<exclude name="WordPress.Arrays.MultipleStatementAlignment.DoubleArrowNotAligned"/>
+	</rule>
+
+	<!-- PHP 7.4+ compatibility, targeting the plugin's minimum WP version. -->
+	<config name="minimum_wp_version" value="6.0"/>
+	<rule ref="PHPCompatibilityWP"/>
+	<config name="testVersion" value="7.4-"/>
+
+	<!-- Project prefixes so global-namespace sniffs pass. -->
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="pdlead"/>
+				<element value="Pdlead_"/>
+				<element value="PDLEAD_"/>
+			</property>
+		</properties>
+	</rule>
+
+	<!-- Text domain for i18n sniffs. -->
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="pipedrive-lead-forms"/>
+			</property>
+		</properties>
+	</rule>
+</ruleset>

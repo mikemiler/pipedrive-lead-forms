@@ -57,7 +57,7 @@ class Pdlead_Rest_Controller {
 	public static function get_token() {
 		// Signal page cache plugins to never store this response.
 		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
-			define( 'DONOTCACHEPAGE', true );
+			define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- DONOTCACHEPAGE is the standard cache-plugin contract constant.
 		}
 		nocache_headers();
 
