@@ -1,0 +1,69 @@
+/* Pipedrive Lead Forms admin styles. */
+
+.pdlead-fields-table input[type="text"],
+.pdlead-fields-table select {
+	width: 100%;
+}
+
+.pdlead-fields-table .pdlead-consent-text {
+	margin-top: 4px;
+}
+
+.pdlead-remove-field {
+	color: #b32d2e;
+	text-decoration: none;
+	font-size: 18px;
+	line-height: 1;
+}
+
+.pdlead-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 3px;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+	background: #ddd;
+	color: #222;
+}
+
+.pdlead-badge-sent {
+	background: #d3f3df;
+	color: #1a7f37;
+}
+
+.pdlead-badge-pending {
+	background: #fff3cd;
+	color: #8a6d00;
+}
+
+.pdlead-badge-failed {
+	background: #fbd5d5;
+	color: #b32d2e;
+}
+
+.pdlead-badge-spam {
+	background: #e2e4e7;
+	color: #555;
+}
+
+.pdlead-badge-flagged {
+	background: #fde2c8;
+	color: #9a5b00;
+}
+
+.pdlead-error {
+	color: #b32d2e;
+}
+
+.pdlead-payload {
+	margin: 0.5em 0 0;
+}
+
+.pdlead-payload dt {
+	font-weight: 600;
+}
+
+.pdlead-payload dd {
+	margin: 0 0 0.5em;
+}

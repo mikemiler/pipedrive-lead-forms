@@ -1,0 +1,75 @@
+/* Pipedrive Lead Forms front-end styles. */
+
+.pdlead-form {
+	max-width: 640px;
+}
+
+.pdlead-row {
+	margin: 0 0 1em;
+}
+
+.pdlead-row label {
+	display: block;
+	margin-bottom: 0.25em;
+	font-weight: 600;
+}
+
+.pdlead-row-check label {
+	font-weight: 400;
+}
+
+.pdlead-row input[type="text"],
+.pdlead-row input[type="email"],
+.pdlead-row input[type="tel"],
+.pdlead-row textarea,
+.pdlead-row select {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 0.6em;
+}
+
+.pdlead-row-check input {
+	margin-right: 0.5em;
+}
+
+.pdlead-req {
+	color: #b32d2e;
+}
+
+.pdlead-submit {
+	padding: 0.7em 1.6em;
+	cursor: pointer;
+}
+
+.pdlead-submit:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+/* Honeypot: removed from view and from assistive tech, but still in the DOM.
+   Off-screen positioning is used instead of display:none so that browsers do
+   not skip it and bots that ignore styles still fill it. */
+.pdlead-hp {
+	position: absolute;
+	left: -9999px;
+	top: auto;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+}
+
+.pdlead-status {
+	margin: 0 0 1em;
+}
+
+.pdlead-status:empty {
+	display: none;
+}
+
+.pdlead-status-error {
+	color: #b32d2e;
+}
+
+.pdlead-status-success {
+	color: #1a7f37;
+}
