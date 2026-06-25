@@ -24,4 +24,8 @@ RELEASING.md
 composer.json
 composer.lock
 phpcs.xml.dist
-vendor
+# Anchored to the repo root: this excludes only the dev phpcs/composer vendor
+# dir, NOT the bundled lib/plugin-update-checker/vendor (PucReadmeParser,
+# Parsedown) which the update checker needs at runtime. An unanchored "vendor"
+# would strip that too and cause a fatal "Class PucReadmeParser not found".
+/vendor

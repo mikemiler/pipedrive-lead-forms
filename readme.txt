@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,9 @@ Updates are delivered via GitHub, not wordpress.org.
 3. Configure your Pipedrive API token and forms under the plugin settings.
 
 == Changelog ==
+
+= 1.1.1 =
+* Fix: the release packaging excluded the bundled update checker `vendor` directory, causing a fatal "Class PucReadmeParser not found" error when checking for updates. The `.distignore` rule is now anchored to the repository root so only the development tooling `vendor` directory is omitted.
 
 = 1.1.0 =
 * New: file upload form field with support for multiple files per field.
