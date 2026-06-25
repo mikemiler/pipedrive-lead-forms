@@ -1,14 +1,17 @@
 <?php
 /**
  * Plugin Name:       Pipedrive Lead Forms
+ * Plugin URI:        https://github.com/mikemiler/pipedrive-lead-forms
  * Description:        Configurable front-end forms that log every submission locally and create leads in Pipedrive. Includes bot protection and cache safe submission.
  * Version:           1.0.0
  * Requires at least:  6.0
  * Requires PHP:       7.4
  * Author:            WP Mike
+ * Author URI:        https://github.com/mikemiler
  * Text Domain:       pipedrive-lead-forms
  * Domain Path:       /languages
  * License:           GPL-2.0-or-later
+ * Update URI:        https://github.com/mikemiler/pipedrive-lead-forms
  *
  * @package PipedriveLeadForms
  */
@@ -40,6 +43,38 @@ require_once PDLEAD_PATH . 'includes/class-rest-controller.php';
 require_once PDLEAD_PATH . 'includes/class-admin-settings.php';
 require_once PDLEAD_PATH . 'includes/class-admin-log.php';
 require_once PDLEAD_PATH . 'includes/class-plugin.php';
+
+/**
+ * GitHub URL of the plugin repository used for updates.
+ *
+ * Update this if the repository is renamed or moved. The slug at the end must
+ * match the plugin folder name (pipedrive-lead-forms).
+ */
+define( 'PDLEAD_UPDATE_REPO', 'https://github.com/mikemiler/pipedrive-lead-forms/' );
+
+/**
+ * Wire up GitHub based plugin updates via the Plugin Update Checker library.
+ *
+ * The plugin is not distributed through wordpress.org. PUC hooks into the
+ * native WordPress update flow, polls the GitHub Releases API and serves the
+ * ZIP asset attached to the latest release. See readme.txt for the changelog
+ * shown in the "View details" dialog.
+ */
+function pdlead_init_updates() {
+	require_once PDLEAD_PATH . 'lib/plugin-update-checker/plugin-update-checker.php';
+
+	$update_checker = YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
+		PDLEAD_UPDATE_REPO,
+		PDLEAD_FILE,
+		'pipedrive-lead-forms'
+	);
+
+	// Public repo: no authentication required. Prefer the ZIP asset attached to
+	// each release over the auto-generated source archive so the extracted
+	// folder structure stays correct.
+	$update_checker->getVcsApi()->enableReleaseAssets();
+}
+add_action( 'init', 'pdlead_init_updates' );
 
 /**
  * Activation: create table, ensure HMAC secret, schedule cron events.

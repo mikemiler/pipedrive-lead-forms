@@ -1,0 +1,13 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Build artifacts
+/build/
+*.zip
+
+# Local-only developer guidance (keep out of the public repo)
+CLAUDE.md

@@ -1,0 +1,50 @@
+name: Release
+
+# Build a clean plugin ZIP and publish it as a GitHub Release asset whenever a
+# version tag (vX.Y.Z) is pushed. The Plugin Update Checker library on each
+# WordPress install reads the latest release and offers it as an update.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches plugin version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          HEADER_VERSION=$(grep -oP '^\s*\*\s*Version:\s*\K[0-9.]+' pipedrive-lead-forms.php)
+          CONST_VERSION=$(grep -oP "PDLEAD_VERSION',\s*'\K[0-9.]+" pipedrive-lead-forms.php)
+          echo "Tag=$TAG Header=$HEADER_VERSION Const=$CONST_VERSION"
+          if [ "$TAG" != "$HEADER_VERSION" ] || [ "$TAG" != "$CONST_VERSION" ]; then
+            echo "::error::Version mismatch. Tag, plugin header and PDLEAD_VERSION must all match."
+            exit 1
+          fi
+
+      - name: Build plugin ZIP
+        run: |
+          SLUG=pipedrive-lead-forms
+          mkdir -p build/$SLUG
+          # .distignore is the single source of truth for what stays out of the ZIP.
+          rsync -a --delete --exclude-from='.distignore' ./ build/$SLUG/
+          echo "=== Contents going into the ZIP ==="
+          find build/$SLUG -maxdepth 1
+          cd build
+          zip -rq $SLUG.zip $SLUG
+          cd ..
+          ls -la build
+
+      - name: Create GitHub Release with ZIP asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/pipedrive-lead-forms.zip
+          generate_release_notes: true

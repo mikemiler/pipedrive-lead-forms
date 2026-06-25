@@ -1,0 +1,21 @@
+# Files and folders that must NOT ship inside the release ZIP.
+# Consumed by the release workflow via `rsync --exclude-from`.
+# readme.txt is intentionally NOT listed: it feeds the update dialog.
+
+.git
+.gitattributes
+.gitignore
+.distignore
+.github
+build
+*.zip
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+
+# Developer-only docs (kept in the repo, but not part of the plugin)
+CLAUDE.md
+RELEASING.md
