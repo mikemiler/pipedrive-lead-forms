@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Pipedrive Lead Forms
  * Plugin URI:        https://github.com/mikemiler/pipedrive-lead-forms
- * Description:        Configurable front-end forms that log every submission locally and create leads in Pipedrive. Includes bot protection and cache safe submission.
- * Version:           1.0.2
+ * Description:        Configurable front-end forms that log every submission locally and create leads in Pipedrive. Includes file uploads, bot protection and cache safe submission.
+ * Version:           1.1.0
  * Requires at least:  6.0
  * Requires PHP:       7.4
  * Author:            WP Mike
@@ -21,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'PDLEAD_VERSION', '1.0.2' );
+define( 'PDLEAD_VERSION', '1.1.0' );
 define( 'PDLEAD_DB_VERSION', 1 );
 define( 'PDLEAD_FILE', __FILE__ );
 define( 'PDLEAD_PATH', plugin_dir_path( __FILE__ ) );
@@ -34,6 +34,7 @@ define( 'PDLEAD_CLEANUP_HOOK', 'pdlead_cleanup_event' );
 // Load classes.
 require_once PDLEAD_PATH . 'includes/class-submission-store.php';
 require_once PDLEAD_PATH . 'includes/class-settings.php';
+require_once PDLEAD_PATH . 'includes/class-file-store.php';
 require_once PDLEAD_PATH . 'includes/class-form-cpt.php';
 require_once PDLEAD_PATH . 'includes/class-form-renderer.php';
 require_once PDLEAD_PATH . 'includes/class-bot-guard.php';
@@ -81,6 +82,9 @@ add_action( 'init', 'pdlead_init_updates' );
  */
 function pdlead_activate() {
 	Pdlead_Submission_Store::install_table();
+
+	// Create and harden the upload directory used by file upload fields.
+	Pdlead_File_Store::ensure_protected();
 
 	// Persistent secret used to sign the timestamp token (HMAC).
 	if ( ! get_option( 'pdlead_hmac_secret' ) ) {

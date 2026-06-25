@@ -41,6 +41,7 @@ class Pdlead_Lead_Dispatcher {
 			'org_name'    => '',
 			'lead_title'  => '',
 			'notes'       => array(),
+			'files'       => array(),
 		);
 
 		foreach ( $fields as $field ) {
@@ -50,6 +51,20 @@ class Pdlead_Lead_Dispatcher {
 			if ( '' === $key || ! isset( $payload[ $key ] ) ) {
 				continue;
 			}
+
+			// File attachments carry metadata arrays, not a scalar value, and
+			// are uploaded separately after the lead exists.
+			if ( 'file' === $map ) {
+				if ( is_array( $payload[ $key ] ) ) {
+					foreach ( $payload[ $key ] as $file ) {
+						if ( is_array( $file ) && ! empty( $file['file'] ) ) {
+							$mapped['files'][] = $file;
+						}
+					}
+				}
+				continue;
+			}
+
 			$value = is_array( $payload[ $key ] ) ? implode( ', ', $payload[ $key ] ) : (string) $payload[ $key ];
 			$value = trim( $value );
 			if ( '' === $value ) {
@@ -201,6 +216,16 @@ class Pdlead_Lead_Dispatcher {
 		// trigger a retry, otherwise the lead would be recreated. Best effort.
 		if ( ! empty( $mapped['notes'] ) && '' !== $lead_id ) {
 			$client->create_note( implode( "\n", $mapped['notes'] ), $lead_id );
+		}
+
+		// Step 4b: file attachments (secondary, best effort like the note). A
+		// retry would recreate the lead, so a failure here must not trigger one.
+		if ( ! empty( $mapped['files'] ) && '' !== $lead_id ) {
+			foreach ( $mapped['files'] as $file ) {
+				$path = Pdlead_File_Store::abs_path( $file['file'] );
+				$name = ! empty( $file['name'] ) ? $file['name'] : wp_basename( $file['file'] );
+				$client->upload_file( $path, $name, $lead_id );
+			}
 		}
 
 		Pdlead_Submission_Store::update(

@@ -319,17 +319,59 @@ class Pdlead_Submission_Store {
 		$cutoff = gmdate( 'Y-m-d H:i:s', time() - ( $days * DAY_IN_SECONDS ) );
 
 		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- table() is a constant table name; all values are prepared.
-		$sql = $wpdb->prepare(
-			'DELETE FROM ' . self::table() . '
-			WHERE created_at < %s
-			AND status IN ( %s, %s )',
-			$cutoff,
-			self::STATUS_SENT,
-			self::STATUS_SPAM
+		// Select the settled rows first so their uploaded files can be removed
+		// before the rows themselves are deleted (no orphaned files left behind).
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT id, payload FROM ' . self::table() . '
+				WHERE created_at < %s
+				AND status IN ( %s, %s )',
+				$cutoff,
+				self::STATUS_SENT,
+				self::STATUS_SPAM
+			),
+			ARRAY_A
 		);
 
-		$result = (int) $wpdb->query( $sql );
+		if ( empty( $rows ) ) {
+			return 0;
+		}
+
+		$ids = array();
+		foreach ( $rows as $row ) {
+			$ids[]   = (int) $row['id'];
+			$payload = json_decode( $row['payload'], true );
+			if ( is_array( $payload ) ) {
+				self::delete_payload_files( $payload );
+			}
+		}
+
+		$placeholders = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+		$result       = (int) $wpdb->query(
+			$wpdb->prepare(
+				'DELETE FROM ' . self::table() . " WHERE id IN ( {$placeholders} )", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- placeholders are %d tokens; ids are bound.
+				$ids
+			)
+		);
 		// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared
 		return $result;
+	}
+
+	/**
+	 * Delete every uploaded file referenced by a decoded payload.
+	 *
+	 * @param array $payload Decoded payload.
+	 */
+	private static function delete_payload_files( $payload ) {
+		foreach ( $payload as $value ) {
+			if ( ! is_array( $value ) ) {
+				continue;
+			}
+			foreach ( $value as $file ) {
+				if ( is_array( $file ) && ! empty( $file['file'] ) ) {
+					Pdlead_File_Store::delete( $file['file'] );
+				}
+			}
+		}
 	}
 }

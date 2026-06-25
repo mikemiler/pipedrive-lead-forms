@@ -197,6 +197,16 @@ class Pdlead_Form_Renderer {
 				<?php
 				break;
 
+			case 'file':
+				$accept = self::accept_attr();
+				?>
+				<p class="pdlead-row">
+					<label for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $label ) . $req_mark; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></label>
+					<input type="file" id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>[]" multiple<?php echo $accept; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?><?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?> />
+				</p>
+				<?php
+				break;
+
 			default:
 				$input_type = in_array( $type, array( 'email', 'tel', 'text' ), true ) ? $type : 'text';
 				?>
@@ -220,5 +230,24 @@ class Pdlead_Form_Renderer {
 	private static function split_options( $raw ) {
 		$parts = array_map( 'trim', explode( ',', (string) $raw ) );
 		return array_values( array_filter( $parts, 'strlen' ) );
+	}
+
+	/**
+	 * Build an accept="..." attribute from the allowed upload types so the file
+	 * picker hints the permitted extensions. UX only; the server still validates.
+	 *
+	 * @return string The attribute (with a leading space) or an empty string.
+	 */
+	private static function accept_attr() {
+		$exts = array();
+		foreach ( array_keys( Pdlead_Settings::allowed_file_mimes() ) as $group ) {
+			foreach ( explode( '|', $group ) as $ext ) {
+				$exts[] = '.' . $ext;
+			}
+		}
+		if ( empty( $exts ) ) {
+			return '';
+		}
+		return ' accept="' . esc_attr( implode( ',', $exts ) ) . '"';
 	}
 }

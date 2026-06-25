@@ -30,6 +30,7 @@ class Pdlead_Form_CPT {
 			'select'   => __( 'Select', 'pipedrive-lead-forms' ),
 			'checkbox' => __( 'Checkbox', 'pipedrive-lead-forms' ),
 			'consent'  => __( 'Consent checkbox', 'pipedrive-lead-forms' ),
+			'file'     => __( 'File Upload', 'pipedrive-lead-forms' ),
 		);
 	}
 
@@ -47,6 +48,7 @@ class Pdlead_Form_CPT {
 			'org_name'    => __( 'Organization: Name', 'pipedrive-lead-forms' ),
 			'lead_title'  => __( 'Lead: Title', 'pipedrive-lead-forms' ),
 			'note'        => __( 'Lead: Note', 'pipedrive-lead-forms' ),
+			'file'        => __( 'Lead: File attachment', 'pipedrive-lead-forms' ),
 			'consent'     => __( 'Consent (not sent)', 'pipedrive-lead-forms' ),
 		);
 	}

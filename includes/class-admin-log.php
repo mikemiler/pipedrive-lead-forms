@@ -25,6 +25,7 @@ class Pdlead_Admin_Log {
 		add_action( 'admin_menu', array( __CLASS__, 'add_page' ) );
 		add_action( 'admin_post_pdlead_retry', array( __CLASS__, 'handle_retry' ) );
 		add_action( 'admin_post_pdlead_retry_all', array( __CLASS__, 'handle_retry_all' ) );
+		add_action( 'admin_post_pdlead_download', array( __CLASS__, 'handle_download' ) );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue' ) );
 	}
 
@@ -170,7 +171,30 @@ class Pdlead_Admin_Log {
 									<dl class="pdlead-payload">
 										<?php foreach ( $payload as $key => $value ) : ?>
 											<dt><?php echo esc_html( $key ); ?></dt>
-											<dd><?php echo esc_html( is_array( $value ) ? implode( ', ', $value ) : $value ); ?></dd>
+											<dd>
+													<?php if ( is_array( $value ) ) : ?>
+														<?php
+														// File fields hold a list of file metadata; link each one
+														// to the protected, admin-only download handler.
+														$parts = array();
+														foreach ( $value as $idx => $file ) {
+															if ( is_array( $file ) && ! empty( $file['file'] ) ) {
+																$dl      = wp_nonce_url(
+																	admin_url( 'admin-post.php?action=pdlead_download&id=' . (int) $row['id'] . '&key=' . rawurlencode( $key ) . '&idx=' . (int) $idx ),
+																	'pdlead_download_' . (int) $row['id'] . '_' . $key . '_' . (int) $idx
+																);
+																$fname   = ! empty( $file['name'] ) ? $file['name'] : wp_basename( $file['file'] );
+																$parts[] = '<a href="' . esc_url( $dl ) . '">' . esc_html( $fname ) . '</a>';
+															} elseif ( is_scalar( $file ) ) {
+																$parts[] = esc_html( (string) $file );
+															}
+														}
+														echo implode( ', ', $parts ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- each part is individually escaped above.
+														?>
+													<?php else : ?>
+														<?php echo esc_html( $value ); ?>
+													<?php endif; ?>
+												</dd>
 										<?php endforeach; ?>
 									</dl>
 								</details>
@@ -257,6 +281,50 @@ class Pdlead_Admin_Log {
 		Pdlead_Lead_Dispatcher::process_retry_queue();
 
 		wp_safe_redirect( self::page_url() );
+		exit;
+	}
+
+	/**
+	 * Stream an uploaded file to an authorized admin. Files live in a protected
+	 * directory, so this handler is the only way to retrieve them.
+	 */
+	public static function handle_download() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You are not allowed to do this.', 'pipedrive-lead-forms' ) );
+		}
+
+		$id  = isset( $_GET['id'] ) ? absint( $_GET['id'] ) : 0;
+		$key = isset( $_GET['key'] ) ? sanitize_key( wp_unslash( $_GET['key'] ) ) : '';
+		$idx = isset( $_GET['idx'] ) ? absint( $_GET['idx'] ) : 0;
+		check_admin_referer( 'pdlead_download_' . $id . '_' . $key . '_' . $idx );
+
+		$row = $id ? Pdlead_Submission_Store::get( $id ) : null;
+		if ( ! $row ) {
+			wp_die( esc_html__( 'File not found.', 'pipedrive-lead-forms' ) );
+		}
+
+		$payload = json_decode( $row['payload'], true );
+		if ( ! is_array( $payload ) || empty( $payload[ $key ][ $idx ] ) || ! is_array( $payload[ $key ][ $idx ] ) ) {
+			wp_die( esc_html__( 'File not found.', 'pipedrive-lead-forms' ) );
+		}
+
+		$file = $payload[ $key ][ $idx ];
+		$path = ! empty( $file['file'] ) ? Pdlead_File_Store::abs_path( $file['file'] ) : '';
+		$dir  = trailingslashit( Pdlead_File_Store::dir() );
+
+		// Never serve anything outside the managed upload directory.
+		if ( '' === $path || 0 !== strpos( wp_normalize_path( $path ), wp_normalize_path( $dir ) ) || ! file_exists( $path ) ) {
+			wp_die( esc_html__( 'File not found.', 'pipedrive-lead-forms' ) );
+		}
+
+		$name = ! empty( $file['name'] ) ? sanitize_file_name( $file['name'] ) : wp_basename( $path );
+
+		nocache_headers();
+		header( 'Content-Type: application/octet-stream' );
+		header( 'Content-Disposition: attachment; filename="' . $name . '"' );
+		header( 'Content-Length: ' . filesize( $path ) );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile -- streaming a local file download; WP_Filesystem cannot stream to output.
+		readfile( $path );
 		exit;
 	}
 }

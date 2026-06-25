@@ -83,6 +83,11 @@ class Pdlead_Admin_Settings {
 		$out['max_attempts']      = max( 1, (int) ( $input['max_attempts'] ?? 6 ) );
 		$out['owner_id']          = max( 0, (int) ( $input['owner_id'] ?? 0 ) );
 		$out['label_ids']         = isset( $input['label_ids'] ) ? sanitize_text_field( $input['label_ids'] ) : '';
+		$out['file_max_size_mb']  = max( 1, (int) ( $input['file_max_size_mb'] ?? 10 ) );
+		// Store the allowed extensions as a clean, comma separated lowercase list.
+		$out['file_allowed_ext'] = isset( $input['file_allowed_ext'] )
+			? implode( ',', Pdlead_Settings::parse_ext_list( $input['file_allowed_ext'] ) )
+			: '';
 
 		// Token: keep the stored value if the field is left blank, and ignore it
 		// entirely when a wp-config constant is in use.
@@ -202,6 +207,32 @@ class Pdlead_Admin_Settings {
 					<tr>
 						<th scope="row"><label for="pdlead_max_attempts"><?php esc_html_e( 'Max retry attempts', 'pipedrive-lead-forms' ); ?></label></th>
 						<td><input type="number" id="pdlead_max_attempts" min="1" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[max_attempts]" value="<?php echo esc_attr( $s['max_attempts'] ); ?>" class="small-text" /></td>
+					</tr>
+				</table>
+
+				<h2><?php esc_html_e( 'File uploads', 'pipedrive-lead-forms' ); ?></h2>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="pdlead_file_max_size"><?php esc_html_e( 'Maximum file size', 'pipedrive-lead-forms' ); ?></label></th>
+						<td>
+							<input type="number" id="pdlead_file_max_size" min="1" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[file_max_size_mb]" value="<?php echo esc_attr( $s['file_max_size_mb'] ); ?>" class="small-text" /> <?php esc_html_e( 'MB per file', 'pipedrive-lead-forms' ); ?>
+							<p class="description">
+								<?php
+								printf(
+									/* translators: %s: human readable server upload limit. */
+									esc_html__( 'Capped by the server upload limit (%s).', 'pipedrive-lead-forms' ),
+									esc_html( size_format( wp_max_upload_size() ) )
+								);
+								?>
+							</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="pdlead_file_allowed_ext"><?php esc_html_e( 'Allowed file types', 'pipedrive-lead-forms' ); ?></label></th>
+						<td>
+							<input type="text" id="pdlead_file_allowed_ext" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[file_allowed_ext]" value="<?php echo esc_attr( $s['file_allowed_ext'] ); ?>" class="regular-text" placeholder="pdf,jpg,png,docx" />
+							<p class="description"><?php esc_html_e( 'Comma separated file extensions. Leave empty to allow all safe file types WordPress permits. Dangerous types (PHP, executables) are always blocked.', 'pipedrive-lead-forms' ); ?></p>
+						</td>
 					</tr>
 				</table>
 

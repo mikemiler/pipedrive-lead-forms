@@ -133,8 +133,17 @@ class Pdlead_Rest_Controller {
 
 		// Validate and sanitize the submitted values.
 		$payload = self::collect_payload( $fields, $params );
+
+		// Store any uploaded files and merge their metadata into the payload.
+		$uploads = self::process_uploads( $fields, $request->get_file_params() );
+		foreach ( $uploads['files'] as $field_key => $list ) {
+			$payload[ $field_key ] = $list;
+		}
+
 		$invalid = self::validate( $fields, $payload );
-		if ( ! empty( $invalid ) ) {
+		if ( $uploads['error'] || ! empty( $invalid ) ) {
+			// Remove just-stored files so a rejected submission leaves nothing behind.
+			self::delete_payload_files( $payload );
 			return self::error( 'validation', __( 'Please complete all required fields correctly.', 'pipedrive-lead-forms' ), 422 );
 		}
 
@@ -204,6 +213,11 @@ class Pdlead_Rest_Controller {
 					$options = array_map( 'trim', explode( ',', isset( $field['options'] ) ? $field['options'] : '' ) );
 					$payload[ $key ] = in_array( $value, $options, true ) ? $value : '';
 					break;
+				case 'file':
+					// Files arrive via $_FILES, not the text params. The actual
+					// stored metadata is merged in later (see process_uploads).
+					$payload[ $key ] = array();
+					break;
 				default:
 					$payload[ $key ] = sanitize_text_field( is_scalar( $raw ) ? $raw : '' );
 					break;
@@ -211,6 +225,56 @@ class Pdlead_Rest_Controller {
 		}
 
 		return $payload;
+	}
+
+	/**
+	 * Store uploaded files for every file field and return their metadata.
+	 *
+	 * @param array $fields Field definitions.
+	 * @param array $files  The request file params ($_FILES).
+	 * @return array { files: array<string,array[]>, error: bool }
+	 */
+	private static function process_uploads( $fields, $files ) {
+		$group  = isset( $files['fields'] ) ? $files['fields'] : array();
+		$result = array(
+			'files' => array(),
+			'error' => false,
+		);
+
+		foreach ( $fields as $field ) {
+			$key  = isset( $field['key'] ) ? $field['key'] : '';
+			$type = isset( $field['type'] ) ? $field['type'] : 'text';
+			if ( '' === $key || 'file' !== $type ) {
+				continue;
+			}
+
+			$handled = Pdlead_File_Store::handle_field_files( $key, $group );
+			if ( $handled['error'] ) {
+				$result['error'] = true;
+			}
+			$result['files'][ $key ] = $handled['files'];
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Delete every stored file referenced by a payload. Used to clean up after
+	 * a rejected submission so no orphaned files remain.
+	 *
+	 * @param array $payload Sanitized values.
+	 */
+	private static function delete_payload_files( $payload ) {
+		foreach ( $payload as $value ) {
+			if ( ! is_array( $value ) ) {
+				continue;
+			}
+			foreach ( $value as $file ) {
+				if ( is_array( $file ) && ! empty( $file['file'] ) ) {
+					Pdlead_File_Store::delete( $file['file'] );
+				}
+			}
+		}
 	}
 
 	/**
@@ -229,11 +293,12 @@ class Pdlead_Rest_Controller {
 			$required = ( isset( $field['required'] ) && 'yes' === $field['required'] );
 			$value    = isset( $payload[ $key ] ) ? $payload[ $key ] : '';
 
-			if ( $required && '' === $value ) {
+			$is_empty = is_array( $value ) ? empty( $value ) : ( '' === $value );
+			if ( $required && $is_empty ) {
 				$invalid[] = $key;
 				continue;
 			}
-			if ( 'email' === $type && '' !== $value && ! is_email( $value ) ) {
+			if ( 'email' === $type && ! is_array( $value ) && '' !== $value && ! is_email( $value ) ) {
 				$invalid[] = $key;
 			}
 		}
@@ -262,12 +327,30 @@ class Pdlead_Rest_Controller {
 			return;
 		}
 
-		$lines = array();
+		$lines       = array();
+		$attachments = array();
 		foreach ( $fields as $field ) {
 			$key   = isset( $field['key'] ) ? $field['key'] : '';
 			$label = isset( $field['label'] ) ? $field['label'] : $key;
-			if ( isset( $payload[ $key ] ) && '' !== $payload[ $key ] ) {
-				$lines[] = $label . ': ' . $payload[ $key ];
+			$value = isset( $payload[ $key ] ) ? $payload[ $key ] : '';
+
+			// File fields: list the file names and attach the stored copies.
+			if ( is_array( $value ) ) {
+				$names = array();
+				foreach ( $value as $file ) {
+					if ( is_array( $file ) && ! empty( $file['file'] ) ) {
+						$names[]       = ! empty( $file['name'] ) ? $file['name'] : wp_basename( $file['file'] );
+						$attachments[] = Pdlead_File_Store::abs_path( $file['file'] );
+					}
+				}
+				if ( $names ) {
+					$lines[] = $label . ': ' . implode( ', ', $names );
+				}
+				continue;
+			}
+
+			if ( '' !== $value ) {
+				$lines[] = $label . ': ' . $value;
 			}
 		}
 
@@ -275,7 +358,7 @@ class Pdlead_Rest_Controller {
 		$subject = sprintf( __( 'New lead: %s', 'pipedrive-lead-forms' ), $form->post_title );
 		$body    = implode( "\n", $lines );
 
-		wp_mail( $to, $subject, $body );
+		wp_mail( $to, $subject, $body, '', $attachments );
 	}
 
 	/**

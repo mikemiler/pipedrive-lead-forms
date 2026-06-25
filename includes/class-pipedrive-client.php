@@ -162,6 +162,97 @@ class Pdlead_Pipedrive_Client {
 	}
 
 	/**
+	 * Upload a local file and attach it to a lead.
+	 *
+	 * @param string $path     Absolute path to the local file.
+	 * @param string $filename File name to present to Pipedrive.
+	 * @param string $lead_id  Lead UUID to attach the file to.
+	 * @return array Request result.
+	 */
+	public function upload_file( $path, $filename, $lead_id ) {
+		if ( ! file_exists( $path ) ) {
+			return $this->result( false, 0, null, false, __( 'Upload file not found.', 'pipedrive-lead-forms' ) );
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading a local file, not a remote URL.
+		$contents = file_get_contents( $path );
+		if ( false === $contents ) {
+			return $this->result( false, 0, null, false, __( 'Could not read upload file.', 'pipedrive-lead-forms' ) );
+		}
+
+		return $this->request_multipart(
+			'/files',
+			array( 'lead_id' => $lead_id ),
+			array(
+				'name'     => 'file',
+				'filename' => $filename,
+				'type'     => 'application/octet-stream',
+				'content'  => $contents,
+			)
+		);
+	}
+
+	/**
+	 * Perform a multipart/form-data POST. The shared request() forces JSON, so
+	 * file uploads build their own boundary body and send it raw.
+	 *
+	 * @param string $path   Path beginning with a slash, e.g. /files.
+	 * @param array  $fields Plain text form fields.
+	 * @param array  $file   File part: name, filename, type, content.
+	 * @return array Request result.
+	 */
+	private function request_multipart( $path, $fields, $file ) {
+		$token = Pdlead_Settings::api_token();
+		if ( '' === $token ) {
+			return $this->result( false, 0, null, false, __( 'No Pipedrive API token configured.', 'pipedrive-lead-forms' ) );
+		}
+
+		$url      = Pdlead_Settings::api_base() . $path;
+		$boundary = 'pdlead' . wp_generate_password( 24, false );
+		$eol      = "\r\n";
+		$fname    = str_replace( array( '"', "\r", "\n" ), '', (string) $file['filename'] );
+
+		$body = '';
+		foreach ( $fields as $name => $value ) {
+			$body .= '--' . $boundary . $eol;
+			$body .= 'Content-Disposition: form-data; name="' . $name . '"' . $eol . $eol;
+			$body .= $value . $eol;
+		}
+		$body .= '--' . $boundary . $eol;
+		$body .= 'Content-Disposition: form-data; name="' . $file['name'] . '"; filename="' . $fname . '"' . $eol;
+		$body .= 'Content-Type: ' . $file['type'] . $eol . $eol;
+		$body .= $file['content'] . $eol;
+		$body .= '--' . $boundary . '--' . $eol;
+
+		$response = wp_remote_post(
+			$url,
+			array(
+				'timeout' => 30,
+				'headers' => array(
+					'x-api-token'  => $token,
+					'Accept'       => 'application/json',
+					'Content-Type' => 'multipart/form-data; boundary=' . $boundary,
+				),
+				'body'    => $body,
+			)
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return $this->result( false, 0, null, true, $response->get_error_message() );
+		}
+
+		$status = (int) wp_remote_retrieve_response_code( $response );
+		$data   = json_decode( wp_remote_retrieve_body( $response ), true );
+
+		if ( $status >= 200 && $status < 300 ) {
+			return $this->result( true, $status, $data, false, '' );
+		}
+
+		$retryable = ( 429 === $status || $status >= 500 );
+		return $this->result( false, $status, $data, $retryable, $this->extract_error( $data, $status ) );
+	}
+
+	/**
 	 * Extract a readable error message from a Pipedrive error body.
 	 *
 	 * @param mixed $data   Decoded body.
