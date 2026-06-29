@@ -119,7 +119,7 @@ class Pdlead_Rest_Controller {
 				)
 			);
 			// Pretend success so a bot learns nothing.
-			return self::success();
+			return self::success( $form_id );
 		}
 
 		// Friendly errors (rate limit, captcha, expired token).
@@ -144,7 +144,7 @@ class Pdlead_Rest_Controller {
 		if ( $uploads['error'] || ! empty( $invalid ) ) {
 			// Remove just-stored files so a rejected submission leaves nothing behind.
 			self::delete_payload_files( $payload );
-			return self::error( 'validation', __( 'Please complete all required fields correctly.', 'pipedrive-lead-forms' ), 422 );
+			return self::error( 'validation', __( 'Please complete all required fields correctly.', 'pipedrive-lead-forms' ), 422, $form_id );
 		}
 
 		$flagged = ( Pdlead_Bot_Guard::ACTION_FLAG === $verdict['action'] );
@@ -164,7 +164,7 @@ class Pdlead_Rest_Controller {
 			// The database write failed. Email the raw lead anyway so it is not
 			// lost, regardless of the backup setting, then report the error.
 			self::backup_email( $post, $fields, $payload, true );
-			return self::error( 'store_failed', __( 'Could not save your submission. Please try again.', 'pipedrive-lead-forms' ), 500 );
+			return self::error( 'store_failed', __( 'Could not save your submission. Please try again.', 'pipedrive-lead-forms' ), 500, $form_id );
 		}
 
 		// Backup email: a copy that does not depend on Pipedrive availability or
@@ -174,7 +174,7 @@ class Pdlead_Rest_Controller {
 		// Try to push immediately. On failure the row stays pending for retry.
 		Pdlead_Lead_Dispatcher::dispatch( $id );
 
-		return self::success();
+		return self::success( $form_id );
 	}
 
 	/**
@@ -362,29 +362,50 @@ class Pdlead_Rest_Controller {
 	}
 
 	/**
-	 * Build a success response.
+	 * Build a success response. Uses the form specific message when one is set,
+	 * otherwise the built-in default.
 	 *
+	 * @param int $form_id Form post ID.
 	 * @return WP_REST_Response
 	 */
-	private static function success() {
+	private static function success( $form_id = 0 ) {
+		$message = $form_id ? Pdlead_Form_CPT::get_success_message( $form_id ) : '';
+		if ( '' === $message ) {
+			$message = __( 'Thank you. Your message has been sent.', 'pipedrive-lead-forms' );
+		}
 		return new WP_REST_Response(
 			array(
 				'ok'      => true,
-				'message' => __( 'Thank you. Your message has been sent.', 'pipedrive-lead-forms' ),
+				'message' => $message,
 			),
 			200
 		);
 	}
 
 	/**
-	 * Build an error response.
+	 * Build an error response. The form specific text overrides the default for
+	 * the generic server error and the validation error when one is set. The
+	 * remaining messages (rate limit, expired session, unavailable form) are
+	 * kept as is so the visitor still gets actionable guidance.
 	 *
 	 * @param string $code    Machine code.
 	 * @param string $message Human message.
 	 * @param int    $status  HTTP status.
+	 * @param int    $form_id Form post ID.
 	 * @return WP_REST_Response
 	 */
-	private static function error( $code, $message, $status ) {
+	private static function error( $code, $message, $status, $form_id = 0 ) {
+		if ( $form_id ) {
+			$custom = '';
+			if ( 'store_failed' === $code ) {
+				$custom = Pdlead_Form_CPT::get_error_message( $form_id );
+			} elseif ( 'validation' === $code ) {
+				$custom = Pdlead_Form_CPT::get_validation_message( $form_id );
+			}
+			if ( '' !== $custom ) {
+				$message = $custom;
+			}
+		}
 		return new WP_REST_Response(
 			array(
 				'ok'      => false,

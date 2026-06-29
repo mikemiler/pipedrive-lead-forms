@@ -110,11 +110,15 @@ class Pdlead_Form_Renderer {
 	private static function render( $form_id, $fields ) {
 		$turnstile_enabled = Pdlead_Settings::get( 'turnstile_enabled' ) && Pdlead_Settings::get( 'turnstile_site_key' );
 
+		// Form specific texts handled on the client: the error text is the fallback
+		// when the request never reaches the server (a network failure), and the
+		// sending text shows while the request is in flight.
+		$error_message   = Pdlead_Form_CPT::get_error_message( $form_id );
+		$sending_message = Pdlead_Form_CPT::get_sending_message( $form_id );
+
 		ob_start();
 		?>
-		<form class="pdlead-form" data-pdlead-form="<?php echo esc_attr( $form_id ); ?>" novalidate>
-			<div class="pdlead-status" role="alert" aria-live="polite"></div>
-
+		<form class="pdlead-form" data-pdlead-form="<?php echo esc_attr( $form_id ); ?>" data-pdlead-error="<?php echo esc_attr( $error_message ); ?>" data-pdlead-sending="<?php echo esc_attr( $sending_message ); ?>" novalidate>
 			<?php foreach ( $fields as $field ) : ?>
 				<?php echo self::render_field( $field ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 			<?php endforeach; ?>
@@ -136,6 +140,8 @@ class Pdlead_Form_Renderer {
 			<input type="hidden" name="pdlead_sig" value="" />
 
 			<button type="submit" class="pdlead-submit"><?php esc_html_e( 'Send', 'pipedrive-lead-forms' ); ?></button>
+
+			<div class="pdlead-status" role="alert" aria-live="polite"></div>
 		</form>
 		<?php
 		return trim( ob_get_clean() );
@@ -164,7 +170,7 @@ class Pdlead_Form_Renderer {
 				?>
 				<p class="pdlead-row">
 					<label for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $label ) . $req_mark; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></label>
-					<textarea id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" rows="5"<?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>></textarea>
+					<textarea id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" rows="5" placeholder="<?php echo esc_attr( $label ); ?>"<?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>></textarea>
 				</p>
 				<?php
 				break;
@@ -212,7 +218,7 @@ class Pdlead_Form_Renderer {
 				?>
 				<p class="pdlead-row">
 					<label for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $label ) . $req_mark; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></label>
-					<input type="<?php echo esc_attr( $input_type ); ?>" id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>"<?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?> />
+					<input type="<?php echo esc_attr( $input_type ); ?>" id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" placeholder="<?php echo esc_attr( $label ); ?>"<?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?> />
 				</p>
 				<?php
 				break;

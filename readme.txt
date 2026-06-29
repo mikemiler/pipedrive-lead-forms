@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.1.1
+Stable tag: 1.2.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,13 @@ Updates are delivered via GitHub, not wordpress.org.
 3. Configure your Pipedrive API token and forms under the plugin settings.
 
 == Changelog ==
+
+= 1.2.0 =
+* New: per-form submission messages. The success, validation, general error and sending texts can now be set individually for each form, with HTML links allowed and a fallback to the built-in defaults when left empty.
+* New: each field label is also used as the input placeholder for text, email, tel and textarea fields.
+* New: the submit button stays disabled until all required fields are filled.
+* Improvement: the consent text is now a full-width textarea shown in its own row only for consent fields, moved out of the "Maps to" column.
+* Improvement: the success and error message now appears below the submit button.
 
 = 1.1.1 =
 * Fix: the release packaging excluded the bundled update checker `vendor` directory, causing a fatal "Class PucReadmeParser not found" error when checking for updates. The `.distignore` rule is now anchored to the repository root so only the development tooling `vendor` directory is omitted.

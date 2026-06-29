@@ -5,8 +5,17 @@
 	width: 100%;
 }
 
+.pdlead-fields-table .pdlead-consent-label {
+	display: block;
+	font-weight: 600;
+}
+
 .pdlead-fields-table .pdlead-consent-text {
 	margin-top: 4px;
+}
+
+.pdlead-fields-table .pdlead-consent-hidden {
+	display: none;
 }
 
 .pdlead-remove-field {

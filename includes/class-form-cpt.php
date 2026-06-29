@@ -14,7 +14,11 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Pdlead_Form_CPT {
 
-	const META_FIELDS = '_pdlead_fields';
+	const META_FIELDS         = '_pdlead_fields';
+	const META_SUCCESS_MSG    = '_pdlead_success_message';
+	const META_ERROR_MSG      = '_pdlead_error_message';
+	const META_VALIDATION_MSG = '_pdlead_validation_message';
+	const META_SENDING_MSG    = '_pdlead_sending_message';
 
 	/**
 	 * Supported field types.
@@ -165,6 +169,46 @@ class Pdlead_Form_CPT {
 	}
 
 	/**
+	 * Get the form specific success message, or '' when none is set.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string
+	 */
+	public static function get_success_message( $post_id ) {
+		return (string) get_post_meta( $post_id, self::META_SUCCESS_MSG, true );
+	}
+
+	/**
+	 * Get the form specific error message, or '' when none is set.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string
+	 */
+	public static function get_error_message( $post_id ) {
+		return (string) get_post_meta( $post_id, self::META_ERROR_MSG, true );
+	}
+
+	/**
+	 * Get the form specific validation message, or '' when none is set.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string
+	 */
+	public static function get_validation_message( $post_id ) {
+		return (string) get_post_meta( $post_id, self::META_VALIDATION_MSG, true );
+	}
+
+	/**
+	 * Get the form specific sending message, or '' when none is set.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string
+	 */
+	public static function get_sending_message( $post_id ) {
+		return (string) get_post_meta( $post_id, self::META_SENDING_MSG, true );
+	}
+
+	/**
 	 * Render the field editor meta box.
 	 *
 	 * @param WP_Post $post Current post.
@@ -220,6 +264,28 @@ class Pdlead_Form_CPT {
 
 		echo '<p><button type="button" class="button" id="pdlead-add-field">' . esc_html__( 'Add field', 'pipedrive-lead-forms' ) . '</button></p>';
 
+		// Form specific submission messages. Leaving a field empty falls back to
+		// the built-in default. HTML links are allowed, like in the consent text.
+		$success_message    = self::get_success_message( $post->ID );
+		$error_message      = self::get_error_message( $post->ID );
+		$validation_message = self::get_validation_message( $post->ID );
+		$sending_message    = self::get_sending_message( $post->ID );
+
+		echo '<h2 class="pdlead-messages-title">' . esc_html__( 'Submission messages', 'pipedrive-lead-forms' ) . '</h2>';
+		echo '<p class="description">' . esc_html__( 'Shown to the visitor around submitting the form. Leave empty to use the default text. HTML links are allowed.', 'pipedrive-lead-forms' ) . '</p>';
+
+		echo '<p><label for="pdlead-success-message"><strong>' . esc_html__( 'Success message', 'pipedrive-lead-forms' ) . '</strong></label><br />';
+		echo '<textarea id="pdlead-success-message" name="pdlead_success_message" rows="2" class="widefat" placeholder="' . esc_attr__( 'Thank you. Your message has been sent.', 'pipedrive-lead-forms' ) . '">' . esc_textarea( $success_message ) . '</textarea></p>';
+
+		echo '<p><label for="pdlead-validation-message"><strong>' . esc_html__( 'Validation message', 'pipedrive-lead-forms' ) . '</strong></label><br />';
+		echo '<textarea id="pdlead-validation-message" name="pdlead_validation_message" rows="2" class="widefat" placeholder="' . esc_attr__( 'Please complete all required fields correctly.', 'pipedrive-lead-forms' ) . '">' . esc_textarea( $validation_message ) . '</textarea></p>';
+
+		echo '<p><label for="pdlead-error-message"><strong>' . esc_html__( 'General error message', 'pipedrive-lead-forms' ) . '</strong></label><br />';
+		echo '<textarea id="pdlead-error-message" name="pdlead_error_message" rows="2" class="widefat" placeholder="' . esc_attr__( 'Something went wrong. Please try again.', 'pipedrive-lead-forms' ) . '">' . esc_textarea( $error_message ) . '</textarea></p>';
+
+		echo '<p><label for="pdlead-sending-message"><strong>' . esc_html__( 'Sending message', 'pipedrive-lead-forms' ) . '</strong></label><br />';
+		echo '<textarea id="pdlead-sending-message" name="pdlead_sending_message" rows="2" class="widefat" placeholder="' . esc_attr__( 'Sending...', 'pipedrive-lead-forms' ) . '">' . esc_textarea( $sending_message ) . '</textarea></p>';
+
 		// Hidden template row used by the repeater script.
 		echo '<script type="text/html" id="pdlead-field-template">';
 		self::render_field_row( array() );
@@ -268,12 +334,20 @@ class Pdlead_Form_CPT {
 		foreach ( self::map_targets() as $value => $label ) {
 			echo '<option value="' . esc_attr( $value ) . '" ' . selected( $field['map_to'], $value, false ) . '>' . esc_html( $label ) . '</option>';
 		}
-		echo '</select>';
-		// Consent text travels with the row but is only relevant for consent fields.
-		echo '<input type="text" name="pdlead_field_consent[]" value="' . esc_attr( $field['consent_text'] ) . '" class="widefat pdlead-consent-text" placeholder="' . esc_attr__( 'Consent text (consent type only)', 'pipedrive-lead-forms' ) . '" /></td>';
+		echo '</select></td>';
 
 		echo '<td><button type="button" class="button-link pdlead-remove-field" aria-label="' . esc_attr__( 'Remove field', 'pipedrive-lead-forms' ) . '">&times;</button></td>';
 
+		echo '</tr>';
+
+		// Consent text lives in its own full-width row directly below the field.
+		// It is only relevant for consent fields, so admin-forms.js shows this row
+		// only when the consent type is selected. The textarea still posts in field
+		// order, so the index alignment in save() stays intact.
+		echo '<tr class="pdlead-consent-row">';
+		echo '<td colspan="7"><label class="pdlead-consent-label">' . esc_html__( 'Consent text', 'pipedrive-lead-forms' ) . ' ';
+		echo '<textarea name="pdlead_field_consent[]" rows="2" class="widefat pdlead-consent-text" placeholder="' . esc_attr__( 'HTML links allowed, e.g. I accept the <a href="/privacy">privacy policy</a>.', 'pipedrive-lead-forms' ) . '">' . esc_textarea( $field['consent_text'] ) . '</textarea>';
+		echo '</label></td>';
 		echo '</tr>';
 	}
 
@@ -349,5 +423,16 @@ class Pdlead_Form_CPT {
 		}
 
 		update_post_meta( $post_id, self::META_FIELDS, $fields );
+
+		// Form specific submission messages. HTML links are allowed, like in the
+		// consent text, so wp_kses_post is the right sanitizer here.
+		$success_message    = isset( $_POST['pdlead_success_message'] ) ? wp_kses_post( wp_unslash( $_POST['pdlead_success_message'] ) ) : '';
+		$error_message      = isset( $_POST['pdlead_error_message'] ) ? wp_kses_post( wp_unslash( $_POST['pdlead_error_message'] ) ) : '';
+		$validation_message = isset( $_POST['pdlead_validation_message'] ) ? wp_kses_post( wp_unslash( $_POST['pdlead_validation_message'] ) ) : '';
+		$sending_message    = isset( $_POST['pdlead_sending_message'] ) ? wp_kses_post( wp_unslash( $_POST['pdlead_sending_message'] ) ) : '';
+		update_post_meta( $post_id, self::META_SUCCESS_MSG, $success_message );
+		update_post_meta( $post_id, self::META_ERROR_MSG, $error_message );
+		update_post_meta( $post_id, self::META_VALIDATION_MSG, $validation_message );
+		update_post_meta( $post_id, self::META_SENDING_MSG, $sending_message );
 	}
 }

@@ -58,10 +58,12 @@
 	}
 
 	/**
-	 * Show a status message inside the form.
+	 * Show a status message inside the form. The message may contain HTML: every
+	 * source is trusted (our own i18n strings, or admin text sanitized server
+	 * side with wp_kses_post), so it is rendered as markup to allow links.
 	 *
 	 * @param {HTMLElement} form    Form element.
-	 * @param {string}      message Text to display.
+	 * @param {string}      message Text or trusted HTML to display.
 	 * @param {boolean}     isError Whether this is an error.
 	 */
 	function setStatus( form, message, isError ) {
@@ -69,9 +71,45 @@
 		if ( ! box ) {
 			return;
 		}
-		box.textContent = message;
+		box.innerHTML = message;
 		box.classList.remove( 'pdlead-status-error', 'pdlead-status-success' );
 		box.classList.add( isError ? 'pdlead-status-error' : 'pdlead-status-success' );
+	}
+
+	/**
+	 * The error text to show when the server sends none, preferring the form's
+	 * own message over the global default.
+	 *
+	 * @param {HTMLElement} form Form element.
+	 * @return {string}
+	 */
+	function errorFallback( form ) {
+		return form.dataset.pdleadError || config.i18n.genericErr;
+	}
+
+	/**
+	 * Enable the submit button only when every required field is filled.
+	 *
+	 * @param {HTMLElement} form Form element.
+	 */
+	function updateSubmitState( form ) {
+		var button = form.querySelector( '.pdlead-submit' );
+		if ( ! button ) {
+			return;
+		}
+
+		var required = form.querySelectorAll( '[required]' );
+		var complete = Array.prototype.every.call( required, function ( field ) {
+			if ( field.type === 'checkbox' || field.type === 'radio' ) {
+				return field.checked;
+			}
+			if ( field.type === 'file' ) {
+				return field.files.length > 0;
+			}
+			return field.value.trim() !== '';
+		} );
+
+		button.disabled = ! complete;
 	}
 
 	/**
@@ -116,7 +154,7 @@
 				return send( form, true );
 			}
 
-			setStatus( form, body.message || config.i18n.genericErr, true );
+			setStatus( form, body.message || errorFallback( form ), true );
 			resetTurnstile( form );
 		} );
 	}
@@ -152,15 +190,15 @@
 		if ( button ) {
 			button.disabled = true;
 		}
-		setStatus( form, config.i18n.sending, false );
+		setStatus( form, form.dataset.pdleadSending || config.i18n.sending, false );
 
 		send( form, false ).catch( function () {
-			setStatus( form, config.i18n.genericErr, true );
+			setStatus( form, errorFallback( form ), true );
 		} ).then( function () {
 			form.dataset.pdleadBusy = '0';
-			if ( button ) {
-				button.disabled = false;
-			}
+			// Recompute instead of unconditionally enabling: after a successful
+			// reset the fields are empty again, so the button must stay disabled.
+			updateSubmitState( form );
 		} );
 	}
 
@@ -170,6 +208,15 @@
 			// Prefetch the token now so the time trap measures real fill time.
 			getToken( form, false );
 			form.addEventListener( 'submit', onSubmit );
+
+			// Keep the submit button in sync with the required fields.
+			updateSubmitState( form );
+			form.addEventListener( 'input', function () {
+				updateSubmitState( form );
+			} );
+			form.addEventListener( 'change', function () {
+				updateSubmitState( form );
+			} );
 		} );
 	} );
 } )();
