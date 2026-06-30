@@ -18,6 +18,35 @@
 	display: none;
 }
 
+.pdlead-fields-table .pdlead-handle-col {
+	width: 28px;
+}
+
+.pdlead-fields-table .pdlead-handle-cell {
+	text-align: center;
+	vertical-align: middle;
+	width: 28px;
+}
+
+.pdlead-drag-handle {
+	cursor: grab;
+	color: #8c8f94;
+}
+
+.pdlead-drag-handle:hover {
+	color: #1d2327;
+}
+
+.pdlead-fields-table tr.ui-sortable-helper {
+	display: table;
+	box-shadow: 0 1px 4px rgba( 0, 0, 0, 0.2 );
+}
+
+.pdlead-fields-table .pdlead-sort-placeholder td {
+	background: #f0f6fc;
+	border: 1px dashed #c3c4c7;
+}
+
 .pdlead-remove-field {
 	color: #b32d2e;
 	text-decoration: none;

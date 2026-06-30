@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.2.0
+Stable tag: 1.2.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,9 @@ Updates are delivered via GitHub, not wordpress.org.
 3. Configure your Pipedrive API token and forms under the plugin settings.
 
 == Changelog ==
+
+= 1.2.1 =
+* New: form fields can now be reordered by drag and drop in the form settings. Grab the handle on the left of a field row to change the order; the new order is used both in the editor and on the front-end form.
 
 = 1.2.0 =
 * New: per-form submission messages. The success, validation, general error and sending texts can now be set individually for each form, with HTML links allowed and a fallback to the built-in defaults when left empty.

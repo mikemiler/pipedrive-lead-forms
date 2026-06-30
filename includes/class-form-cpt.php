@@ -137,7 +137,7 @@ class Pdlead_Form_CPT {
 		}
 
 		wp_enqueue_style( 'pdlead-admin', PDLEAD_URL . 'assets/admin.css', array(), PDLEAD_VERSION );
-		wp_enqueue_script( 'pdlead-admin-forms', PDLEAD_URL . 'assets/admin-forms.js', array(), PDLEAD_VERSION, true );
+		wp_enqueue_script( 'pdlead-admin-forms', PDLEAD_URL . 'assets/admin-forms.js', array( 'jquery-ui-sortable' ), PDLEAD_VERSION, true );
 	}
 
 	/**
@@ -247,6 +247,7 @@ class Pdlead_Form_CPT {
 		echo '<p class="description">' . esc_html__( 'Define the fields shown in the form and how each maps to Pipedrive. At least one field should map to Person: Email.', 'pipedrive-lead-forms' ) . '</p>';
 
 		echo '<table class="widefat pdlead-fields-table" id="pdlead-fields-table"><thead><tr>';
+		echo '<th class="pdlead-handle-col"><span class="screen-reader-text">' . esc_html__( 'Reorder', 'pipedrive-lead-forms' ) . '</span></th>';
 		echo '<th>' . esc_html__( 'Label', 'pipedrive-lead-forms' ) . '</th>';
 		echo '<th>' . esc_html__( 'Key', 'pipedrive-lead-forms' ) . '</th>';
 		echo '<th>' . esc_html__( 'Type', 'pipedrive-lead-forms' ) . '</th>';
@@ -313,6 +314,8 @@ class Pdlead_Form_CPT {
 
 		echo '<tr class="pdlead-field-row">';
 
+		echo '<td class="pdlead-handle-cell"><span class="pdlead-drag-handle dashicons dashicons-menu" aria-hidden="true" title="' . esc_attr__( 'Drag to reorder', 'pipedrive-lead-forms' ) . '"></span></td>';
+
 		echo '<td><input type="text" name="pdlead_field_label[]" value="' . esc_attr( $field['label'] ) . '" class="widefat" /></td>';
 
 		echo '<td><input type="text" name="pdlead_field_key[]" value="' . esc_attr( $field['key'] ) . '" class="widefat" /></td>';
@@ -345,7 +348,7 @@ class Pdlead_Form_CPT {
 		// only when the consent type is selected. The textarea still posts in field
 		// order, so the index alignment in save() stays intact.
 		echo '<tr class="pdlead-consent-row">';
-		echo '<td colspan="7"><label class="pdlead-consent-label">' . esc_html__( 'Consent text', 'pipedrive-lead-forms' ) . ' ';
+		echo '<td colspan="8"><label class="pdlead-consent-label">' . esc_html__( 'Consent text', 'pipedrive-lead-forms' ) . ' ';
 		echo '<textarea name="pdlead_field_consent[]" rows="2" class="widefat pdlead-consent-text" placeholder="' . esc_attr__( 'HTML links allowed, e.g. I accept the <a href="/privacy">privacy policy</a>.', 'pipedrive-lead-forms' ) . '">' . esc_textarea( $field['consent_text'] ) . '</textarea>';
 		echo '</label></td>';
 		echo '</tr>';

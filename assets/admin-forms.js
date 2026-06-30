@@ -85,6 +85,61 @@
 		}
 	}
 
+	/**
+	 * Enable drag and drop reordering of field rows via jQuery UI sortable.
+	 *
+	 * Only field rows are sortable. Each consent row must stay directly after
+	 * its field row, because save() pairs the consent textarea to its field by
+	 * submit position. We detach the consent row on drag start and re-insert it
+	 * after its field row on stop so the index alignment stays intact.
+	 */
+	function initSortable() {
+		var $ = window.jQuery;
+		if ( ! $ || ! $.fn || ! $.fn.sortable ) {
+			return;
+		}
+		var $body = $( '#pdlead-fields-table tbody' );
+		if ( ! $body.length ) {
+			return;
+		}
+
+		$body.sortable( {
+			items: '> tr.pdlead-field-row',
+			handle: '.pdlead-drag-handle',
+			axis: 'y',
+			cursor: 'grabbing',
+			placeholder: 'pdlead-sort-placeholder',
+			forcePlaceholderSize: true,
+			helper: function ( event, row ) {
+				// Lock cell widths so the dragged row keeps the table layout.
+				var $original = row.children();
+				var $helper = row.clone();
+				$helper.children().each( function ( index ) {
+					$( this ).width( $original.eq( index ).width() );
+				} );
+				return $helper;
+			},
+			start: function ( event, ui ) {
+				ui.placeholder.html( '<td colspan="8"></td>' );
+				ui.placeholder.height( ui.item.outerHeight() );
+
+				// Travel with the paired consent row, if any.
+				var consentRow = consentRowFor( ui.item[ 0 ] );
+				ui.item.data( 'pdleadConsentRow', consentRow );
+				if ( consentRow ) {
+					$( consentRow ).detach();
+				}
+			},
+			stop: function ( event, ui ) {
+				var consentRow = ui.item.data( 'pdleadConsentRow' );
+				if ( consentRow ) {
+					ui.item.after( consentRow );
+					ui.item.removeData( 'pdleadConsentRow' );
+				}
+			}
+		} );
+	}
+
 	document.addEventListener( 'DOMContentLoaded', function () {
 		document.addEventListener( 'click', onClick );
 		document.addEventListener( 'change', onChange );
@@ -92,5 +147,7 @@
 		// Apply the initial visibility to rows rendered on the server.
 		var rows = document.querySelectorAll( '#pdlead-fields-table .pdlead-field-row' );
 		Array.prototype.forEach.call( rows, toggleConsent );
+
+		initSortable();
 	} );
 } )();
