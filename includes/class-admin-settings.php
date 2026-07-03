@@ -82,6 +82,9 @@ class Pdlead_Admin_Settings {
 		$out['retention_days']    = max( 0, (int) ( $input['retention_days'] ?? 90 ) );
 		$out['max_attempts']      = max( 1, (int) ( $input['max_attempts'] ?? 6 ) );
 		$out['owner_id']          = max( 0, (int) ( $input['owner_id'] ?? 0 ) );
+		// Lead visibility: whitelist to Pipedrive's visible_to levels (0 = leave unset).
+		$vis                      = (int) ( $input['visible_to'] ?? 0 );
+		$out['visible_to']        = in_array( $vis, array( 0, 1, 3, 5, 7 ), true ) ? $vis : 0;
 		$out['label_ids']         = isset( $input['label_ids'] ) ? sanitize_text_field( $input['label_ids'] ) : '';
 		$out['file_max_size_mb']  = max( 1, (int) ( $input['file_max_size_mb'] ?? 10 ) );
 		// Store the allowed extensions as a clean, comma separated lowercase list.
@@ -181,6 +184,26 @@ class Pdlead_Admin_Settings {
 						<th scope="row"><label for="pdlead_owner_id"><?php esc_html_e( 'Default owner ID', 'pipedrive-lead-forms' ); ?></label></th>
 						<td><input type="number" id="pdlead_owner_id" min="0" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[owner_id]" value="<?php echo esc_attr( $s['owner_id'] ); ?>" class="small-text" />
 							<p class="description"><?php esc_html_e( 'Optional Pipedrive user ID that owns new leads. 0 uses the token owner.', 'pipedrive-lead-forms' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="pdlead_visible_to"><?php esc_html_e( 'Lead visibility', 'pipedrive-lead-forms' ); ?></label></th>
+						<td>
+							<select id="pdlead_visible_to" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[visible_to]">
+								<?php
+								$visibility_options = array(
+									0 => __( 'Pipedrive default (currently: owner only)', 'pipedrive-lead-forms' ),
+									1 => __( 'Owner only', 'pipedrive-lead-forms' ),
+									3 => __( "Owner's visibility group", 'pipedrive-lead-forms' ),
+									5 => __( "Owner's visibility group and sub-groups", 'pipedrive-lead-forms' ),
+									7 => __( 'Entire company', 'pipedrive-lead-forms' ),
+								);
+								foreach ( $visibility_options as $value => $label ) {
+									echo '<option value="' . esc_attr( $value ) . '" ' . selected( (int) $s['visible_to'], $value, false ) . '>' . esc_html( $label ) . '</option>';
+								}
+								?>
+							</select>
+							<p class="description"><?php esc_html_e( 'Who can see new leads, persons and organizations. Choose "Owner\'s visibility group" so the owner\'s whole group sees them instead of the owner alone. Visibility groups require a Professional or Enterprise Pipedrive plan; on lower plans "Owner\'s visibility group" behaves like "Entire company".', 'pipedrive-lead-forms' ); ?></p>
 						</td>
 					</tr>
 					<tr>

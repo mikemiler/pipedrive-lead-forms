@@ -116,11 +116,12 @@ class Pdlead_Pipedrive_Client {
 	/**
 	 * Create an organization.
 	 *
-	 * @param string $name Organization name.
+	 * @param string $name  Organization name.
+	 * @param array  $extra Optional extra fields to merge into the payload (e.g. visible_to).
 	 * @return array Request result; ID available at data.data.id.
 	 */
-	public function create_organization( $name ) {
-		return $this->request( 'POST', '/organizations', array( 'name' => $name ) );
+	public function create_organization( $name, $extra = array() ) {
+		return $this->request( 'POST', '/organizations', array_merge( array( 'name' => $name ), $extra ) );
 	}
 
 	/**

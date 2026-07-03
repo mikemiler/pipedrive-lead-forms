@@ -38,6 +38,7 @@ class Pdlead_Settings {
 			'retention_days'         => 90,
 			'max_attempts'           => 6,
 			'owner_id'               => 0,
+			'visible_to'             => 0,
 			'label_ids'              => '',
 			'file_max_size_mb'       => 10,
 			'file_allowed_ext'       => '',

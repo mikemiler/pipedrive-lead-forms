@@ -144,10 +144,13 @@ class Pdlead_Lead_Dispatcher {
 		$person_id   = $row['pipedrive_person_id'] ? (int) $row['pipedrive_person_id'] : 0;
 		$lead_id     = $row['pipedrive_lead_id'] ? (string) $row['pipedrive_lead_id'] : '';
 		$settings    = Pdlead_Settings::all();
+		// Pipedrive visible_to level shared by lead, person and organization. 0 = leave unset.
+		$visible_to  = (int) $settings['visible_to'];
 
 		// Step 1: organization (optional, only when a name was provided).
 		if ( ! $org_id && '' !== $mapped['org_name'] ) {
-			$res = $client->create_organization( $mapped['org_name'] );
+			$org_extra = $visible_to > 0 ? array( 'visible_to' => (string) $visible_to ) : array();
+			$res       = $client->create_organization( $mapped['org_name'], $org_extra );
 			if ( ! $res['ok'] ) {
 				return self::handle_failure( $id, $row, $res );
 			}
@@ -176,6 +179,10 @@ class Pdlead_Lead_Dispatcher {
 				if ( $org_id ) {
 					$person_payload['org_id'] = $org_id;
 				}
+				if ( $visible_to > 0 ) {
+					// Pipedrive API v1 expects visible_to as a string ("1", "3", "5", "7").
+					$person_payload['visible_to'] = (string) $visible_to;
+				}
 
 				$res = $client->create_person( $person_payload );
 				if ( ! $res['ok'] ) {
@@ -198,6 +205,9 @@ class Pdlead_Lead_Dispatcher {
 			}
 			if ( (int) $settings['owner_id'] > 0 ) {
 				$lead_payload['owner_id'] = (int) $settings['owner_id'];
+			}
+			if ( $visible_to > 0 ) {
+				$lead_payload['visible_to'] = (string) $visible_to;
 			}
 			$label_ids = self::parse_label_ids( $settings['label_ids'] );
 			if ( $label_ids ) {
