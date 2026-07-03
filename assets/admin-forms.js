@@ -11,14 +11,47 @@
 	}
 
 	/**
-	 * The consent text lives in its own row right after the field row.
+	 * Resolve the consent row that belongs to a field row.
+	 *
+	 * The pairing is cached on first lookup, which happens while the rows are
+	 * still rendered in their original adjacent order (on init and right after a
+	 * row is added). We must not rely on the live DOM sibling afterwards: drag
+	 * and drop can move a field row away from its consent row, and the save
+	 * handler pairs consent texts to fields purely by submit position. Caching
+	 * keeps that pairing stable no matter how the rows are reordered.
 	 *
 	 * @param {HTMLElement} row Field row.
 	 * @return {HTMLElement|null} The consent row, or null when absent.
 	 */
 	function consentRowFor( row ) {
-		var next = row.nextElementSibling;
-		return next && next.classList.contains( 'pdlead-consent-row' ) ? next : null;
+		if ( ! row ) {
+			return null;
+		}
+		if ( row._pdleadConsentRow === undefined ) {
+			var next = row.nextElementSibling;
+			row._pdleadConsentRow = next && next.classList.contains( 'pdlead-consent-row' ) ? next : null;
+		}
+		return row._pdleadConsentRow;
+	}
+
+	/**
+	 * Re-attach every consent row directly after its own field row.
+	 *
+	 * Called after a drag so the consent textareas post in the same order as
+	 * their field rows, which is what save() relies on for index alignment.
+	 */
+	function normalizeConsentRows() {
+		var body = document.querySelector( '#pdlead-fields-table tbody' );
+		if ( ! body ) {
+			return;
+		}
+		var rows = body.querySelectorAll( '.pdlead-field-row' );
+		Array.prototype.forEach.call( rows, function ( fieldRow ) {
+			var consentRow = consentRowFor( fieldRow );
+			if ( consentRow && fieldRow.nextSibling !== consentRow ) {
+				body.insertBefore( consentRow, fieldRow.nextSibling );
+			}
+		} );
 	}
 
 	/**
@@ -90,8 +123,9 @@
 	 *
 	 * Only field rows are sortable. Each consent row must stay directly after
 	 * its field row, because save() pairs the consent textarea to its field by
-	 * submit position. We detach the consent row on drag start and re-insert it
-	 * after its field row on stop so the index alignment stays intact.
+	 * submit position. Sortable can leave consent rows stranded between other
+	 * fields, so on stop we restore the adjacency of every pair (see
+	 * normalizeConsentRows) to keep the index alignment intact.
 	 */
 	function initSortable() {
 		var $ = window.jQuery;
@@ -123,19 +157,17 @@
 				ui.placeholder.html( '<td colspan="8"></td>' );
 				ui.placeholder.height( ui.item.outerHeight() );
 
-				// Travel with the paired consent row, if any.
+				// Pull the paired consent row out of the way during the drag.
+				// It is restored, together with every other pair, on stop.
 				var consentRow = consentRowFor( ui.item[ 0 ] );
-				ui.item.data( 'pdleadConsentRow', consentRow );
 				if ( consentRow ) {
 					$( consentRow ).detach();
 				}
 			},
-			stop: function ( event, ui ) {
-				var consentRow = ui.item.data( 'pdleadConsentRow' );
-				if ( consentRow ) {
-					ui.item.after( consentRow );
-					ui.item.removeData( 'pdleadConsentRow' );
-				}
+			stop: function () {
+				// Restore the field row / consent row adjacency for all pairs so
+				// the consent textareas post in the same order as their fields.
+				normalizeConsentRows();
 			}
 		} );
 	}
