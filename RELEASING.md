@@ -15,6 +15,28 @@ via GitHub Releases and picked up automatically on every install by the bundled
 4. The user clicks update; WordPress downloads the **ZIP asset** attached to the
    release, extracts it and replaces the plugin folder.
 
+## Pre-release checks
+
+Run the linter before cutting a release. The `Lint` GitHub Action runs the same
+check on every push, and the build is expected to be green before you tag.
+
+The dev tooling (PHP_CodeSniffer + WordPress Coding Standards) lives in
+`composer.json` under `require-dev` and is never shipped in the release ZIP
+(`/vendor/` is gitignored and excluded by `.distignore`).
+
+```bash
+composer install     # once: installs phpcs/phpcbf into vendor/ (gitignored)
+composer lint        # phpcs against phpcs.xml.dist -- this is the CI gate
+composer lint:fix    # phpcbf: auto-fix the fixable violations, then re-lint
+```
+
+The ruleset (`phpcs.xml.dist`) is WordPress-Extra plus security and PHP 7.4
+compatibility sniffs. The gate fails on **errors**; **warnings** are reported but
+do not fail the build (`ignore_warnings_on_exit`). Most alignment and whitespace
+warnings are auto-fixable: run `composer lint:fix`, then re-run `composer lint`
+and confirm a clean run (0 errors, 0 warnings) before tagging. A quick
+`php -l <file>` is a cheap syntax sanity check on any file you touched.
+
 ## Cutting a new release
 
 Keep these three in sync; the CI checks it and fails otherwise:
@@ -28,14 +50,15 @@ Steps:
 1. Bump the version in both spots in `pipedrive-lead-forms.php`.
 2. Add a `= X.Y.Z =` entry under `== Changelog ==` in `readme.txt` and update
    `Stable tag`.
-3. Commit, then tag and push:
+3. Run `composer lint` and make sure it is clean (see *Pre-release checks*).
+4. Commit, then tag and push:
 
    ```bash
    git tag vX.Y.Z
    git push origin main --tags
    ```
 
-4. The `Release` GitHub Action builds `pipedrive-lead-forms.zip` (top-level
+5. The `Release` GitHub Action builds `pipedrive-lead-forms.zip` (top-level
    folder `pipedrive-lead-forms/`) and publishes it as a release asset. No
    manual zipping needed.
 

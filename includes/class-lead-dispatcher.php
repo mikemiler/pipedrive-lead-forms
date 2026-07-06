@@ -145,7 +145,7 @@ class Pdlead_Lead_Dispatcher {
 		$lead_id     = $row['pipedrive_lead_id'] ? (string) $row['pipedrive_lead_id'] : '';
 		$settings    = Pdlead_Settings::all();
 		// Pipedrive visible_to level shared by lead, person and organization. 0 = leave unset.
-		$visible_to  = (int) $settings['visible_to'];
+		$visible_to = (int) $settings['visible_to'];
 
 		// Step 1: organization (optional, only when a name was provided).
 		if ( ! $org_id && '' !== $mapped['org_name'] ) {
