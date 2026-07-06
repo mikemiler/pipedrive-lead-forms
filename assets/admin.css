@@ -105,3 +105,55 @@
 .pdlead-payload dd {
 	margin: 0 0 0.5em;
 }
+
+/* Lead label selector: one checkbox per Pipedrive lead label. */
+.pdlead-label-choice {
+	display: block;
+	margin: 0 0 0.35em;
+}
+
+.pdlead-label-dot {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	margin: 0 0.15em 0 0.35em;
+	vertical-align: middle;
+	background: #a7aaad;
+}
+
+.pdlead-label-dot--green {
+	background: #2eab53;
+}
+
+.pdlead-label-dot--blue {
+	background: #2d7ff9;
+}
+
+.pdlead-label-dot--red {
+	background: #d63638;
+}
+
+.pdlead-label-dot--yellow {
+	background: #f0b849;
+}
+
+.pdlead-label-dot--purple {
+	background: #7b57d6;
+}
+
+.pdlead-label-dot--gray {
+	background: #a7aaad;
+}
+
+.pdlead-label-dot--brown {
+	background: #a05a2c;
+}
+
+.pdlead-label-dot--pink {
+	background: #e35b93;
+}
+
+.pdlead-label-dot--orange {
+	background: #e67e22;
+}

@@ -80,6 +80,36 @@ class Pdlead_Pipedrive_Client {
 	}
 
 	/**
+	 * Fetch the lead labels defined in the connected Pipedrive account.
+	 *
+	 * @return array|null List of labels ( each: id, name, color ), an empty
+	 *                    array when the account has none, or null when the
+	 *                    labels could not be loaded (missing token or API error).
+	 */
+	public function get_lead_labels() {
+		$res = $this->request( 'GET', '/leadLabels' );
+		if ( ! $res['ok'] ) {
+			return null;
+		}
+		if ( empty( $res['data']['data'] ) || ! is_array( $res['data']['data'] ) ) {
+			return array();
+		}
+
+		$labels = array();
+		foreach ( $res['data']['data'] as $label ) {
+			if ( empty( $label['id'] ) || ! isset( $label['name'] ) ) {
+				continue;
+			}
+			$labels[] = array(
+				'id'    => (string) $label['id'],
+				'name'  => (string) $label['name'],
+				'color' => isset( $label['color'] ) ? (string) $label['color'] : '',
+			);
+		}
+		return $labels;
+	}
+
+	/**
 	 * Search for an existing person by exact email.
 	 *
 	 * @param string $email Email address.

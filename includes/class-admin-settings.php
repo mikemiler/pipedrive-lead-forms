@@ -19,11 +19,19 @@ class Pdlead_Admin_Settings {
 	const MENU_TOP = 'edit.php?post_type=pdlead_form';
 
 	/**
+	 * Admin page hook suffix of the settings page, used to scope asset loading.
+	 *
+	 * @var string
+	 */
+	private static $page_hook = '';
+
+	/**
 	 * Register hooks.
 	 */
 	public static function init() {
 		add_action( 'admin_menu', array( __CLASS__, 'add_page' ) );
 		add_action( 'admin_init', array( __CLASS__, 'register' ) );
+		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ) );
 		add_action( 'admin_post_pdlead_test_connection', array( __CLASS__, 'handle_test_connection' ) );
 		add_action( 'admin_notices', array( __CLASS__, 'maybe_show_test_notice' ) );
 	}
@@ -32,7 +40,7 @@ class Pdlead_Admin_Settings {
 	 * Add the settings submenu.
 	 */
 	public static function add_page() {
-		add_submenu_page(
+		self::$page_hook = add_submenu_page(
 			self::MENU_TOP,
 			__( 'Pipedrive Settings', 'pipedrive-lead-forms' ),
 			__( 'Settings', 'pipedrive-lead-forms' ),
@@ -40,6 +48,18 @@ class Pdlead_Admin_Settings {
 			self::PAGE,
 			array( __CLASS__, 'render' )
 		);
+	}
+
+	/**
+	 * Load the admin stylesheet on the settings page only (for the lead label swatches).
+	 *
+	 * @param string $hook_suffix Current admin page hook suffix.
+	 */
+	public static function enqueue_assets( $hook_suffix ) {
+		if ( '' === self::$page_hook || $hook_suffix !== self::$page_hook ) {
+			return;
+		}
+		wp_enqueue_style( 'pdlead-admin', PDLEAD_URL . 'assets/admin.css', array(), PDLEAD_VERSION );
 	}
 
 	/**
@@ -68,25 +88,34 @@ class Pdlead_Admin_Settings {
 		$existing = Pdlead_Settings::all();
 		$out      = Pdlead_Settings::defaults();
 
-		$out['company_domain']  = isset( $input['company_domain'] ) ? sanitize_text_field( $input['company_domain'] ) : '';
-		$out['turnstile_enabled'] = empty( $input['turnstile_enabled'] ) ? 0 : 1;
-		$out['turnstile_site_key']   = isset( $input['turnstile_site_key'] ) ? sanitize_text_field( $input['turnstile_site_key'] ) : '';
-		$out['turnstile_secret_key'] = isset( $input['turnstile_secret_key'] ) ? sanitize_text_field( $input['turnstile_secret_key'] ) : '';
-		$out['ratelimit_enabled'] = empty( $input['ratelimit_enabled'] ) ? 0 : 1;
-		$out['ratelimit_max']     = max( 1, (int) ( $input['ratelimit_max'] ?? 5 ) );
-		$out['ratelimit_window']  = max( 60, (int) ( $input['ratelimit_window'] ?? 600 ) );
-		$out['time_trap_seconds'] = max( 0, (int) ( $input['time_trap_seconds'] ?? 2 ) );
-		$out['backup_email']      = isset( $input['backup_email'] ) ? sanitize_email( $input['backup_email'] ) : '';
+		$out['company_domain']         = isset( $input['company_domain'] ) ? sanitize_text_field( $input['company_domain'] ) : '';
+		$out['turnstile_enabled']      = empty( $input['turnstile_enabled'] ) ? 0 : 1;
+		$out['turnstile_site_key']     = isset( $input['turnstile_site_key'] ) ? sanitize_text_field( $input['turnstile_site_key'] ) : '';
+		$out['turnstile_secret_key']   = isset( $input['turnstile_secret_key'] ) ? sanitize_text_field( $input['turnstile_secret_key'] ) : '';
+		$out['ratelimit_enabled']      = empty( $input['ratelimit_enabled'] ) ? 0 : 1;
+		$out['ratelimit_max']          = max( 1, (int) ( $input['ratelimit_max'] ?? 5 ) );
+		$out['ratelimit_window']       = max( 60, (int) ( $input['ratelimit_window'] ?? 600 ) );
+		$out['time_trap_seconds']      = max( 0, (int) ( $input['time_trap_seconds'] ?? 2 ) );
+		$out['backup_email']           = isset( $input['backup_email'] ) ? sanitize_email( $input['backup_email'] ) : '';
 		$out['backup_on_every_submit'] = empty( $input['backup_on_every_submit'] ) ? 0 : 1;
-		$out['notify_email']      = isset( $input['notify_email'] ) ? sanitize_email( $input['notify_email'] ) : '';
-		$out['retention_days']    = max( 0, (int) ( $input['retention_days'] ?? 90 ) );
-		$out['max_attempts']      = max( 1, (int) ( $input['max_attempts'] ?? 6 ) );
-		$out['owner_id']          = max( 0, (int) ( $input['owner_id'] ?? 0 ) );
+		$out['notify_email']           = isset( $input['notify_email'] ) ? sanitize_email( $input['notify_email'] ) : '';
+		$out['retention_days']         = max( 0, (int) ( $input['retention_days'] ?? 90 ) );
+		$out['max_attempts']           = max( 1, (int) ( $input['max_attempts'] ?? 6 ) );
+		$out['owner_id']               = max( 0, (int) ( $input['owner_id'] ?? 0 ) );
 		// Lead visibility: whitelist to Pipedrive's visible_to levels (0 = leave unset).
-		$vis                      = (int) ( $input['visible_to'] ?? 0 );
-		$out['visible_to']        = in_array( $vis, array( 0, 1, 3, 5, 7 ), true ) ? $vis : 0;
-		$out['label_ids']         = isset( $input['label_ids'] ) ? sanitize_text_field( $input['label_ids'] ) : '';
-		$out['file_max_size_mb']  = max( 1, (int) ( $input['file_max_size_mb'] ?? 10 ) );
+		$vis               = (int) ( $input['visible_to'] ?? 0 );
+		$out['visible_to'] = in_array( $vis, array( 0, 1, 3, 5, 7 ), true ) ? $vis : 0;
+		// Lead labels: the settings page submits selected label IDs as an array.
+		// A marker field tells "user cleared all" apart from "selector not rendered"
+		// (no token / API error), so an unavailable API never wipes stored IDs.
+		if ( ! empty( $input['label_ids_present'] ) ) {
+			$ids              = isset( $input['label_ids'] ) ? (array) $input['label_ids'] : array();
+			$ids              = array_values( array_unique( array_filter( array_map( 'sanitize_text_field', $ids ), 'strlen' ) ) );
+			$out['label_ids'] = implode( ',', $ids );
+		} else {
+			$out['label_ids'] = isset( $existing['label_ids'] ) ? $existing['label_ids'] : '';
+		}
+		$out['file_max_size_mb'] = max( 1, (int) ( $input['file_max_size_mb'] ?? 10 ) );
 		// Store the allowed extensions as a clean, comma separated lowercase list.
 		$out['file_allowed_ext'] = isset( $input['file_allowed_ext'] )
 			? implode( ',', Pdlead_Settings::parse_ext_list( $input['file_allowed_ext'] ) )
@@ -207,10 +236,8 @@ class Pdlead_Admin_Settings {
 						</td>
 					</tr>
 					<tr>
-						<th scope="row"><label for="pdlead_label_ids"><?php esc_html_e( 'Lead label IDs', 'pipedrive-lead-forms' ); ?></label></th>
-						<td><input type="text" id="pdlead_label_ids" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[label_ids]" value="<?php echo esc_attr( $s['label_ids'] ); ?>" class="regular-text" placeholder="id1,id2" />
-							<p class="description"><?php esc_html_e( 'Optional comma separated lead label IDs.', 'pipedrive-lead-forms' ); ?></p>
-						</td>
+						<th scope="row"><?php esc_html_e( 'Lead labels', 'pipedrive-lead-forms' ); ?></th>
+						<td><?php self::render_label_ids_field( $s ); ?></td>
 					</tr>
 					<tr>
 						<th scope="row"><?php esc_html_e( 'Backup email', 'pipedrive-lead-forms' ); ?></th>
@@ -275,6 +302,60 @@ class Pdlead_Admin_Settings {
 	}
 
 	/**
+	 * Render the lead label selector.
+	 *
+	 * Shows a checkbox per Pipedrive lead label (name visible, ID stored). When
+	 * the labels cannot be loaded (no token yet or an API error) only a hint is
+	 * shown and no field is emitted, so saving leaves the stored value untouched.
+	 * Stored IDs whose label no longer exists in Pipedrive are preserved.
+	 *
+	 * @param array $s Current settings.
+	 */
+	private static function render_label_ids_field( $s ) {
+		$stored = array_values( array_filter( array_map( 'trim', explode( ',', (string) $s['label_ids'] ) ), 'strlen' ) );
+		$labels = ( new Pdlead_Pipedrive_Client() )->get_lead_labels();
+
+		if ( null === $labels ) {
+			echo '<p class="description">' . esc_html__( 'Save a valid Pipedrive API token and run "Test Pipedrive connection" first, then your lead labels can be selected here.', 'pipedrive-lead-forms' ) . '</p>';
+			return;
+		}
+
+		// Marker so an all-unchecked save is distinguishable from the field not being rendered.
+		echo '<input type="hidden" name="' . esc_attr( Pdlead_Settings::OPTION ) . '[label_ids_present]" value="1" />';
+
+		$name     = Pdlead_Settings::OPTION . '[label_ids][]';
+		$selected = array_flip( $stored );
+		$known    = array();
+
+		foreach ( $labels as $label ) {
+			$known[ $label['id'] ] = true;
+			$checked               = isset( $selected[ $label['id'] ] ) ? ' checked' : '';
+			$dot_class             = 'pdlead-label-dot pdlead-label-dot--' . sanitize_html_class( $label['color'], 'default' );
+			printf(
+				'<label class="pdlead-label-choice"><input type="checkbox" name="%1$s" value="%2$s"%3$s /> <span class="%4$s"></span> %5$s</label>',
+				esc_attr( $name ),
+				esc_attr( $label['id'] ),
+				esc_attr( $checked ),
+				esc_attr( $dot_class ),
+				esc_html( $label['name'] )
+			);
+		}
+
+		// Preserve stored IDs whose label no longer exists in Pipedrive so a save does not drop them.
+		foreach ( $stored as $id ) {
+			if ( ! isset( $known[ $id ] ) ) {
+				printf( '<input type="hidden" name="%1$s" value="%2$s" />', esc_attr( $name ), esc_attr( $id ) );
+			}
+		}
+
+		if ( empty( $labels ) ) {
+			echo '<p class="description">' . esc_html__( 'No lead labels found in Pipedrive.', 'pipedrive-lead-forms' ) . '</p>';
+		} else {
+			echo '<p class="description">' . esc_html__( 'Select the lead labels to add to every new lead.', 'pipedrive-lead-forms' ) . '</p>';
+		}
+	}
+
+	/**
 	 * Handle the test connection form post.
 	 */
 	public static function handle_test_connection() {
@@ -296,7 +377,7 @@ class Pdlead_Admin_Settings {
 			set_transient(
 				'pdlead_test_result',
 				array(
-					'ok' => true,
+					'ok'      => true,
 					'message' => $message,
 				),
 				60
@@ -305,7 +386,7 @@ class Pdlead_Admin_Settings {
 			set_transient(
 				'pdlead_test_result',
 				array(
-					'ok' => false,
+					'ok'      => false,
 					'message' => $res['error'],
 				),
 				60
