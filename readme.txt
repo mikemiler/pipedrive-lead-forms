@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.3.0
+Stable tag: 1.4.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,9 @@ Updates are delivered via GitHub, not wordpress.org.
 3. Configure your Pipedrive API token and forms under the plugin settings.
 
 == Changelog ==
+
+= 1.4.0 =
+* New: lead labels are now selected by name in the settings. The free-text "Lead label IDs" field is replaced by a checkbox list populated from your Pipedrive account, so you no longer have to look up and type label IDs. Existing saved label IDs keep working unchanged, and labels deleted in Pipedrive are preserved. When no valid API token is configured the selector shows a hint instead and never overwrites your saved labels.
 
 = 1.3.0 =
 * New: lead visibility setting. Choose whether new leads, persons and organizations are visible to the owner only or shared with the owner's visibility group (optionally including sub-groups, or the entire company). Defaults to Pipedrive's own default, so existing installs keep their current behavior until changed. Visibility groups require a Professional or Enterprise Pipedrive plan; on lower plans the group option behaves like "Entire company".
