@@ -23,25 +23,27 @@ class Pdlead_Settings {
 	 */
 	public static function defaults() {
 		return array(
-			'company_domain'         => '',
-			'api_token'              => '',
-			'turnstile_enabled'      => 0,
-			'turnstile_site_key'     => '',
-			'turnstile_secret_key'   => '',
-			'ratelimit_enabled'      => 1,
-			'ratelimit_max'          => 5,
-			'ratelimit_window'       => 600,
-			'time_trap_seconds'      => 2,
-			'backup_email'           => '',
-			'backup_on_every_submit' => 1,
-			'notify_email'           => '',
-			'retention_days'         => 90,
-			'max_attempts'           => 6,
-			'owner_id'               => 0,
-			'visible_to'             => 0,
-			'label_ids'              => '',
-			'file_max_size_mb'       => 10,
-			'file_allowed_ext'       => '',
+			'company_domain'          => '',
+			'api_token'               => '',
+			'turnstile_enabled'       => 0,
+			'turnstile_site_key'      => '',
+			'turnstile_secret_key'    => '',
+			'ratelimit_enabled'       => 1,
+			'ratelimit_max'           => 5,
+			'ratelimit_window'        => 600,
+			'time_trap_seconds'       => 2,
+			'backup_email'            => '',
+			'backup_on_every_submit'  => 1,
+			'notify_email'            => '',
+			'retention_days'          => 90,
+			'max_attempts'            => 6,
+			'owner_id'                => 0,
+			'visible_to'              => 0,
+			'label_ids'               => '',
+			'custom_field_key'        => '',
+			'custom_field_option_ids' => '',
+			'file_max_size_mb'        => 10,
+			'file_allowed_ext'        => '',
 		);
 	}
 
@@ -101,7 +103,17 @@ class Pdlead_Settings {
 	 * @return string
 	 */
 	public static function api_base() {
-		$domain = trim( (string) self::get( 'company_domain', '' ) );
+		return self::api_base_for_domain( (string) self::get( 'company_domain', '' ) );
+	}
+
+	/**
+	 * Build the API base URL for a given company domain value.
+	 *
+	 * @param string $domain Raw company domain setting value.
+	 * @return string
+	 */
+	public static function api_base_for_domain( $domain ) {
+		$domain = trim( (string) $domain );
 		if ( $domain ) {
 			// Accept either "acme" or "acme.pipedrive.com".
 			$domain = preg_replace( '#^https?://#', '', $domain );

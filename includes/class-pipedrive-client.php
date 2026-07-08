@@ -16,6 +16,51 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Pdlead_Pipedrive_Client {
 
 	/**
+	 * Optional API token override.
+	 *
+	 * @var string|null
+	 */
+	private $token_override;
+
+	/**
+	 * Optional API base URL override.
+	 *
+	 * @var string|null
+	 */
+	private $api_base_override;
+
+	/**
+	 * The overrides let the settings sanitizer validate against the token and
+	 * company domain being saved before they are persisted; every other caller
+	 * uses the stored settings via the null defaults.
+	 *
+	 * @param string|null $token    Optional API token override.
+	 * @param string|null $api_base Optional API base URL override.
+	 */
+	public function __construct( $token = null, $api_base = null ) {
+		$this->token_override    = $token;
+		$this->api_base_override = $api_base;
+	}
+
+	/**
+	 * Resolve the API token, preferring the override.
+	 *
+	 * @return string
+	 */
+	private function token() {
+		return null !== $this->token_override ? (string) $this->token_override : Pdlead_Settings::api_token();
+	}
+
+	/**
+	 * Resolve the API base URL, preferring the override.
+	 *
+	 * @return string
+	 */
+	private function base_url() {
+		return null !== $this->api_base_override ? (string) $this->api_base_override : Pdlead_Settings::api_base();
+	}
+
+	/**
 	 * Perform an API request.
 	 *
 	 * @param string     $method HTTP method.
@@ -25,12 +70,12 @@ class Pdlead_Pipedrive_Client {
 	 * @return array { ok: bool, status: int, data: array|null, retryable: bool, error: string }
 	 */
 	public function request( $method, $path, $body = null, $query = array() ) {
-		$token = Pdlead_Settings::api_token();
+		$token = $this->token();
 		if ( '' === $token ) {
 			return $this->result( false, 0, null, false, __( 'No Pipedrive API token configured.', 'pipedrive-lead-forms' ) );
 		}
 
-		$url = Pdlead_Settings::api_base() . $path;
+		$url = $this->base_url() . $path;
 		if ( ! empty( $query ) ) {
 			// add_query_arg URL-encodes values, so pass them raw.
 			$url = add_query_arg( $query, $url );
@@ -107,6 +152,105 @@ class Pdlead_Pipedrive_Client {
 			);
 		}
 		return $labels;
+	}
+
+	/**
+	 * Fetch the custom deal fields that offer selectable options.
+	 *
+	 * Leads share their custom fields with deals, so custom fields (e.g. an
+	 * acquisition type) are discovered here. Only option fields (enum = single
+	 * choice, set = multiple) that are user-editable custom fields are returned;
+	 * built-in enums such as the deal status are skipped.
+	 *
+	 * @return array|null List of fields ( each: key, name, field_type, options[
+	 *                    id, label ] ), an empty array when the account has no
+	 *                    such fields, or null when they could not be loaded
+	 *                    (missing token or API error).
+	 */
+	public function get_deal_option_fields() {
+		$res = $this->request(
+			'GET',
+			'/dealFields',
+			null,
+			array(
+				'start' => 0,
+				'limit' => 500,
+			)
+		);
+		if ( ! $res['ok'] ) {
+			return null;
+		}
+		if ( empty( $res['data']['data'] ) || ! is_array( $res['data']['data'] ) ) {
+			return array();
+		}
+
+		$fields = array();
+		foreach ( $res['data']['data'] as $field ) {
+			if ( empty( $field['key'] ) || ! isset( $field['name'] ) ) {
+				continue;
+			}
+			$type = isset( $field['field_type'] ) ? (string) $field['field_type'] : '';
+			if ( 'enum' !== $type && 'set' !== $type ) {
+				continue;
+			}
+			// Only user-editable custom fields; built-in enums report edit_flag false.
+			if ( isset( $field['edit_flag'] ) && false === $field['edit_flag'] ) {
+				continue;
+			}
+
+			$options = array();
+			if ( ! empty( $field['options'] ) && is_array( $field['options'] ) ) {
+				foreach ( $field['options'] as $option ) {
+					if ( ! isset( $option['id'] ) || ! isset( $option['label'] ) ) {
+						continue;
+					}
+					$options[] = array(
+						'id'    => (string) $option['id'],
+						'label' => (string) $option['label'],
+					);
+				}
+			}
+
+			$fields[] = array(
+				'key'        => (string) $field['key'],
+				'name'       => (string) $field['name'],
+				'field_type' => $type,
+				'options'    => $options,
+			);
+		}
+		return $fields;
+	}
+
+	/**
+	 * Fetch the users of the connected Pipedrive account.
+	 *
+	 * Deactivated users are included on purpose: their IDs are still valid
+	 * owner IDs within the account.
+	 *
+	 * @return array|null List of users ( each: id, name ), an empty array when
+	 *                    the account has none, or null when they could not be
+	 *                    loaded (missing token or API error).
+	 */
+	public function get_users() {
+		$res = $this->request( 'GET', '/users' );
+		if ( ! $res['ok'] ) {
+			return null;
+		}
+		if ( empty( $res['data']['data'] ) || ! is_array( $res['data']['data'] ) ) {
+			return array();
+		}
+
+		$users = array();
+		foreach ( $res['data']['data'] as $user ) {
+			if ( empty( $user['id'] ) ) {
+				continue;
+			}
+			$users[] = array(
+				'id'   => (int) $user['id'],
+				'name' => isset( $user['name'] ) ? (string) $user['name'] : '',
+			);
+		}
+		return $users;
 	}
 
 	/**
@@ -233,12 +377,12 @@ class Pdlead_Pipedrive_Client {
 	 * @return array Request result.
 	 */
 	private function request_multipart( $path, $fields, $file ) {
-		$token = Pdlead_Settings::api_token();
+		$token = $this->token();
 		if ( '' === $token ) {
 			return $this->result( false, 0, null, false, __( 'No Pipedrive API token configured.', 'pipedrive-lead-forms' ) );
 		}
 
-		$url      = Pdlead_Settings::api_base() . $path;
+		$url      = $this->base_url() . $path;
 		$boundary = 'pdlead' . wp_generate_password( 24, false );
 		$eol      = "\r\n";
 		$fname    = str_replace( array( '"', "\r", "\n" ), '', (string) $file['filename'] );

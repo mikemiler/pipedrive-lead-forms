@@ -157,3 +157,9 @@
 .pdlead-label-dot--orange {
 	background: #e67e22;
 }
+
+/* Custom-field selector: one radio/checkbox per option of the chosen field. */
+.pdlead-custom-field-choice {
+	display: block;
+	margin: 0 0 0.35em;
+}

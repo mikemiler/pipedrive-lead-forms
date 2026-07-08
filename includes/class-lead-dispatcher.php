@@ -209,9 +209,16 @@ class Pdlead_Lead_Dispatcher {
 			if ( $visible_to > 0 ) {
 				$lead_payload['visible_to'] = (string) $visible_to;
 			}
-			$label_ids = self::parse_label_ids( $settings['label_ids'] );
+			$label_ids = self::parse_id_list( $settings['label_ids'] );
 			if ( $label_ids ) {
 				$lead_payload['label_ids'] = $label_ids;
+			}
+			// Custom field: leads share deal custom fields, so the field key
+			// carries its selected option ID(s) (enum: "123"; set: "12,13").
+			$cf_key = (string) $settings['custom_field_key'];
+			$cf_ids = self::parse_id_list( $settings['custom_field_option_ids'] );
+			if ( '' !== $cf_key && $cf_ids ) {
+				$lead_payload[ $cf_key ] = implode( ',', $cf_ids );
 			}
 
 			$res = $client->create_lead( $lead_payload );
@@ -335,12 +342,14 @@ class Pdlead_Lead_Dispatcher {
 	}
 
 	/**
-	 * Parse a comma separated list of label IDs into an array of strings.
+	 * Parse a comma separated list of IDs into an array of non-empty strings.
+	 *
+	 * Used for both lead label IDs and custom field option IDs.
 	 *
 	 * @param string $raw Raw value.
 	 * @return string[]
 	 */
-	private static function parse_label_ids( $raw ) {
+	private static function parse_id_list( $raw ) {
 		$parts = array_map( 'trim', explode( ',', (string) $raw ) );
 		return array_values( array_filter( $parts, 'strlen' ) );
 	}

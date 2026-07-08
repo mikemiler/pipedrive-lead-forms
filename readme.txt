@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.4.0
+Stable tag: 1.5.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,11 @@ Updates are delivered via GitHub, not wordpress.org.
 3. Configure your Pipedrive API token and forms under the plugin settings.
 
 == Changelog ==
+
+= 1.5.0 =
+* New: custom field support. Pick one of your Pipedrive custom option fields (leads share them with deals) and its value(s) in the settings; every new lead is created with that field set. Single-choice fields render as radios, multi-choice fields as checkboxes.
+* Changed: settings are now validated against the connected Pipedrive account on save. Lead labels, the default owner ID and the selected custom field and its values that do not exist in the connected account (for example after switching the API token to a different account) are removed with an admin warning instead of being kept and breaking lead creation with "Provided labelId does not exist". When the Pipedrive API cannot be reached during save, stored values are kept unchanged, so a temporary outage never wipes your settings.
+* Improvement: the settings page now shows admin notices, including the standard "Settings saved." confirmation and the new validation warnings.
 
 = 1.4.0 =
 * New: lead labels are now selected by name in the settings. The free-text "Lead label IDs" field is replaced by a checkbox list populated from your Pipedrive account, so you no longer have to look up and type label IDs. Existing saved label IDs keep working unchanged, and labels deleted in Pipedrive are preserved. When no valid API token is configured the selector shows a hint instead and never overwrites your saved labels.

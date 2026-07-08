@@ -88,7 +88,25 @@ class Pdlead_Admin_Settings {
 		$existing = Pdlead_Settings::all();
 		$out      = Pdlead_Settings::defaults();
 
-		$out['company_domain']         = isset( $input['company_domain'] ) ? sanitize_text_field( $input['company_domain'] ) : '';
+		$out['company_domain'] = isset( $input['company_domain'] ) ? sanitize_text_field( $input['company_domain'] ) : '';
+
+		// Token first: keep the stored value if the field is left blank, and
+		// ignore it entirely when a wp-config constant is in use. It is resolved
+		// before the ID checks below so they validate against the account of the
+		// token being saved, not the previously stored one.
+		if ( Pdlead_Settings::token_is_constant() ) {
+			$out['api_token'] = '';
+		} elseif ( isset( $input['api_token'] ) && '' !== trim( $input['api_token'] ) ) {
+			$out['api_token'] = trim( sanitize_text_field( $input['api_token'] ) );
+		} else {
+			$out['api_token'] = isset( $existing['api_token'] ) ? $existing['api_token'] : '';
+		}
+		$effective_token = Pdlead_Settings::token_is_constant() ? Pdlead_Settings::api_token() : $out['api_token'];
+
+		// Client for validating account-scoped IDs, honoring a token or company
+		// domain changed in this same save.
+		$client = new Pdlead_Pipedrive_Client( $effective_token, Pdlead_Settings::api_base_for_domain( $out['company_domain'] ) );
+
 		$out['turnstile_enabled']      = empty( $input['turnstile_enabled'] ) ? 0 : 1;
 		$out['turnstile_site_key']     = isset( $input['turnstile_site_key'] ) ? sanitize_text_field( $input['turnstile_site_key'] ) : '';
 		$out['turnstile_secret_key']   = isset( $input['turnstile_secret_key'] ) ? sanitize_text_field( $input['turnstile_secret_key'] ) : '';
@@ -101,35 +119,128 @@ class Pdlead_Admin_Settings {
 		$out['notify_email']           = isset( $input['notify_email'] ) ? sanitize_email( $input['notify_email'] ) : '';
 		$out['retention_days']         = max( 0, (int) ( $input['retention_days'] ?? 90 ) );
 		$out['max_attempts']           = max( 1, (int) ( $input['max_attempts'] ?? 6 ) );
-		$out['owner_id']               = max( 0, (int) ( $input['owner_id'] ?? 0 ) );
+		// Owner: reject IDs that do not exist in the connected account. When the
+		// users cannot be loaded the submitted value is kept, so an API hiccup
+		// never resets the setting.
+		$out['owner_id'] = max( 0, (int) ( $input['owner_id'] ?? 0 ) );
+		if ( $out['owner_id'] > 0 ) {
+			$users = $client->get_users();
+			if ( null !== $users && ! in_array( $out['owner_id'], array_column( $users, 'id' ), true ) ) {
+				$out['owner_id'] = 0;
+				add_settings_error(
+					Pdlead_Settings::OPTION,
+					'pdlead_stale_owner',
+					__( 'The default owner ID does not exist in the connected Pipedrive account and was reset to 0 (token owner).', 'pipedrive-lead-forms' ),
+					'warning'
+				);
+			}
+		}
 		// Lead visibility: whitelist to Pipedrive's visible_to levels (0 = leave unset).
 		$vis               = (int) ( $input['visible_to'] ?? 0 );
 		$out['visible_to'] = in_array( $vis, array( 0, 1, 3, 5, 7 ), true ) ? $vis : 0;
 		// Lead labels: the settings page submits selected label IDs as an array.
 		// A marker field tells "user cleared all" apart from "selector not rendered"
 		// (no token / API error), so an unavailable API never wipes stored IDs.
+		// Submitted IDs are validated against the connected account's labels and
+		// unknown ones dropped (stale after an account switch, or deleted in
+		// Pipedrive); when the labels cannot be loaded they are kept as submitted.
 		if ( ! empty( $input['label_ids_present'] ) ) {
-			$ids              = isset( $input['label_ids'] ) ? (array) $input['label_ids'] : array();
-			$ids              = array_values( array_unique( array_filter( array_map( 'sanitize_text_field', $ids ), 'strlen' ) ) );
+			$ids = isset( $input['label_ids'] ) ? (array) $input['label_ids'] : array();
+			$ids = array_values( array_unique( array_filter( array_map( 'sanitize_text_field', $ids ), 'strlen' ) ) );
+			if ( $ids ) {
+				$labels = $client->get_lead_labels();
+				if ( null !== $labels ) {
+					$known = array_fill_keys( array_column( $labels, 'id' ), true );
+					$kept  = array_values(
+						array_filter(
+							$ids,
+							static function ( $id ) use ( $known ) {
+								return isset( $known[ $id ] );
+							}
+						)
+					);
+					if ( count( $kept ) < count( $ids ) ) {
+						add_settings_error(
+							Pdlead_Settings::OPTION,
+							'pdlead_stale_labels',
+							__( 'One or more selected lead labels do not exist in the connected Pipedrive account and were removed.', 'pipedrive-lead-forms' ),
+							'warning'
+						);
+					}
+					$ids = $kept;
+				}
+			}
 			$out['label_ids'] = implode( ',', $ids );
 		} else {
 			$out['label_ids'] = isset( $existing['label_ids'] ) ? $existing['label_ids'] : '';
+		}
+		// Custom field: the chosen custom deal field key plus its selected option
+		// IDs. Same present-marker logic as labels so an unavailable API never
+		// wipes stored values. When the field changes the old option IDs belong
+		// to a different field and are dropped. Key and option IDs are validated
+		// against the connected account's fields; when the fields cannot be
+		// loaded they are kept as submitted.
+		if ( ! empty( $input['custom_field_present'] ) ) {
+			$key          = isset( $input['custom_field_key'] ) ? sanitize_text_field( $input['custom_field_key'] ) : '';
+			$existing_key = isset( $existing['custom_field_key'] ) ? $existing['custom_field_key'] : '';
+			$field        = null;
+			if ( '' !== $key ) {
+				$fields = $client->get_deal_option_fields();
+				if ( null !== $fields ) {
+					foreach ( $fields as $candidate ) {
+						if ( $candidate['key'] === $key ) {
+							$field = $candidate;
+							break;
+						}
+					}
+					if ( null === $field ) {
+						$key = '';
+						add_settings_error(
+							Pdlead_Settings::OPTION,
+							'pdlead_stale_custom_field',
+							__( 'The selected custom field does not exist in the connected Pipedrive account and was cleared.', 'pipedrive-lead-forms' ),
+							'warning'
+						);
+					}
+				}
+			}
+			$out['custom_field_key'] = $key;
+			if ( '' === $key || $key !== $existing_key ) {
+				$out['custom_field_option_ids'] = '';
+			} else {
+				$ids = isset( $input['custom_field_option_ids'] ) ? (array) $input['custom_field_option_ids'] : array();
+				$ids = array_values( array_unique( array_filter( array_map( 'sanitize_text_field', $ids ), 'strlen' ) ) );
+				if ( $ids && null !== $field ) {
+					$known = array_fill_keys( array_column( $field['options'], 'id' ), true );
+					$kept  = array_values(
+						array_filter(
+							$ids,
+							static function ( $id ) use ( $known ) {
+								return isset( $known[ $id ] );
+							}
+						)
+					);
+					if ( count( $kept ) < count( $ids ) ) {
+						add_settings_error(
+							Pdlead_Settings::OPTION,
+							'pdlead_stale_custom_options',
+							__( 'One or more selected custom field values do not exist in the connected Pipedrive account and were removed.', 'pipedrive-lead-forms' ),
+							'warning'
+						);
+					}
+					$ids = $kept;
+				}
+				$out['custom_field_option_ids'] = implode( ',', $ids );
+			}
+		} else {
+			$out['custom_field_key']        = isset( $existing['custom_field_key'] ) ? $existing['custom_field_key'] : '';
+			$out['custom_field_option_ids'] = isset( $existing['custom_field_option_ids'] ) ? $existing['custom_field_option_ids'] : '';
 		}
 		$out['file_max_size_mb'] = max( 1, (int) ( $input['file_max_size_mb'] ?? 10 ) );
 		// Store the allowed extensions as a clean, comma separated lowercase list.
 		$out['file_allowed_ext'] = isset( $input['file_allowed_ext'] )
 			? implode( ',', Pdlead_Settings::parse_ext_list( $input['file_allowed_ext'] ) )
 			: '';
-
-		// Token: keep the stored value if the field is left blank, and ignore it
-		// entirely when a wp-config constant is in use.
-		if ( Pdlead_Settings::token_is_constant() ) {
-			$out['api_token'] = '';
-		} elseif ( isset( $input['api_token'] ) && '' !== trim( $input['api_token'] ) ) {
-			$out['api_token'] = trim( sanitize_text_field( $input['api_token'] ) );
-		} else {
-			$out['api_token'] = isset( $existing['api_token'] ) ? $existing['api_token'] : '';
-		}
 
 		return $out;
 	}
@@ -146,6 +257,8 @@ class Pdlead_Admin_Settings {
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Pipedrive Lead Forms', 'pipedrive-lead-forms' ); ?></h1>
+
+			<?php settings_errors(); ?>
 
 			<form method="post" action="options.php">
 				<?php settings_fields( self::GROUP ); ?>
@@ -240,6 +353,10 @@ class Pdlead_Admin_Settings {
 						<td><?php self::render_label_ids_field( $s ); ?></td>
 					</tr>
 					<tr>
+						<th scope="row"><?php esc_html_e( 'Custom field', 'pipedrive-lead-forms' ); ?></th>
+						<td><?php self::render_custom_field( $s ); ?></td>
+					</tr>
+					<tr>
 						<th scope="row"><?php esc_html_e( 'Backup email', 'pipedrive-lead-forms' ); ?></th>
 						<td>
 							<label><input type="checkbox" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[backup_on_every_submit]" value="1" <?php checked( $s['backup_on_every_submit'], 1 ); ?> /> <?php esc_html_e( 'Email a copy of every submission (recommended, guarantees no lead is lost)', 'pipedrive-lead-forms' ); ?></label>
@@ -307,7 +424,8 @@ class Pdlead_Admin_Settings {
 	 * Shows a checkbox per Pipedrive lead label (name visible, ID stored). When
 	 * the labels cannot be loaded (no token yet or an API error) only a hint is
 	 * shown and no field is emitted, so saving leaves the stored value untouched.
-	 * Stored IDs whose label no longer exists in Pipedrive are preserved.
+	 * Stored IDs whose label does not exist in the connected account render no
+	 * control and are dropped by the sanitizer on save.
 	 *
 	 * @param array $s Current settings.
 	 */
@@ -325,12 +443,10 @@ class Pdlead_Admin_Settings {
 
 		$name     = Pdlead_Settings::OPTION . '[label_ids][]';
 		$selected = array_flip( $stored );
-		$known    = array();
 
 		foreach ( $labels as $label ) {
-			$known[ $label['id'] ] = true;
-			$checked               = isset( $selected[ $label['id'] ] ) ? ' checked' : '';
-			$dot_class             = 'pdlead-label-dot pdlead-label-dot--' . sanitize_html_class( $label['color'], 'default' );
+			$checked   = isset( $selected[ $label['id'] ] ) ? ' checked' : '';
+			$dot_class = 'pdlead-label-dot pdlead-label-dot--' . sanitize_html_class( $label['color'], 'default' );
 			printf(
 				'<label class="pdlead-label-choice"><input type="checkbox" name="%1$s" value="%2$s"%3$s /> <span class="%4$s"></span> %5$s</label>',
 				esc_attr( $name ),
@@ -341,17 +457,106 @@ class Pdlead_Admin_Settings {
 			);
 		}
 
-		// Preserve stored IDs whose label no longer exists in Pipedrive so a save does not drop them.
-		foreach ( $stored as $id ) {
-			if ( ! isset( $known[ $id ] ) ) {
-				printf( '<input type="hidden" name="%1$s" value="%2$s" />', esc_attr( $name ), esc_attr( $id ) );
-			}
-		}
-
 		if ( empty( $labels ) ) {
 			echo '<p class="description">' . esc_html__( 'No lead labels found in Pipedrive.', 'pipedrive-lead-forms' ) . '</p>';
 		} else {
 			echo '<p class="description">' . esc_html__( 'Select the lead labels to add to every new lead.', 'pipedrive-lead-forms' ) . '</p>';
+		}
+	}
+
+	/**
+	 * Render the custom-field selector.
+	 *
+	 * Leads share custom fields with deals. A dropdown chooses which custom
+	 * option field to use (for example an acquisition type); the field's options
+	 * are then shown as radios (enum, single choice) or checkboxes (set,
+	 * multiple). When the fields cannot be loaded (no token or API error) only a
+	 * hint is shown and no control is emitted, so saving leaves the stored values
+	 * untouched. Stored option IDs whose option does not exist in the connected
+	 * account render no control and are dropped by the sanitizer on save.
+	 *
+	 * @param array $s Current settings.
+	 */
+	private static function render_custom_field( $s ) {
+		$stored_key = (string) $s['custom_field_key'];
+		$stored_ids = array_values( array_filter( array_map( 'trim', explode( ',', (string) $s['custom_field_option_ids'] ) ), 'strlen' ) );
+		$fields     = ( new Pdlead_Pipedrive_Client() )->get_deal_option_fields();
+
+		if ( null === $fields ) {
+			echo '<p class="description">' . esc_html__( 'Save a valid Pipedrive API token and run "Test Pipedrive connection" first, then a custom field can be selected here.', 'pipedrive-lead-forms' ) . '</p>';
+			return;
+		}
+
+		// Marker so a cleared selection is distinguishable from the control not being rendered.
+		echo '<input type="hidden" name="' . esc_attr( Pdlead_Settings::OPTION ) . '[custom_field_present]" value="1" />';
+
+		if ( empty( $fields ) ) {
+			echo '<p class="description">' . esc_html__( 'No custom option fields found in Pipedrive.', 'pipedrive-lead-forms' ) . '</p>';
+			return;
+		}
+
+		// Field selector: pick which custom deal field to set on new leads.
+		$field_name     = Pdlead_Settings::OPTION . '[custom_field_key]';
+		$selected_field = null;
+		echo '<select name="' . esc_attr( $field_name ) . '">';
+		echo '<option value="">' . esc_html__( '(none)', 'pipedrive-lead-forms' ) . '</option>';
+		foreach ( $fields as $field ) {
+			if ( $field['key'] === $stored_key ) {
+				$selected_field = $field;
+			}
+			printf(
+				'<option value="%1$s"%2$s>%3$s</option>',
+				esc_attr( $field['key'] ),
+				selected( $field['key'], $stored_key, false ),
+				esc_html( $field['name'] )
+			);
+		}
+		echo '</select>';
+		echo '<p class="description">' . esc_html__( 'Choose a Pipedrive custom field, save, then select its value(s) below.', 'pipedrive-lead-forms' ) . '</p>';
+
+		if ( null === $selected_field ) {
+			return;
+		}
+
+		// Options of the chosen field: checkboxes for multi (set), radios for single (enum).
+		$is_multi  = ( 'set' === $selected_field['field_type'] );
+		$input_tag = $is_multi ? 'checkbox' : 'radio';
+		$opt_name  = Pdlead_Settings::OPTION . '[custom_field_option_ids][]';
+		$selected  = array_flip( $stored_ids );
+
+		if ( ! $is_multi ) {
+			// A "none" radio lets a single-choice field be cleared again.
+			$has_selection = false;
+			foreach ( $selected_field['options'] as $option ) {
+				if ( isset( $selected[ $option['id'] ] ) ) {
+					$has_selection = true;
+					break;
+				}
+			}
+			printf(
+				'<label class="pdlead-custom-field-choice"><input type="radio" name="%1$s" value=""%2$s /> %3$s</label>',
+				esc_attr( $opt_name ),
+				$has_selection ? '' : ' checked',
+				esc_html__( '(none)', 'pipedrive-lead-forms' )
+			);
+		}
+
+		foreach ( $selected_field['options'] as $option ) {
+			$checked = isset( $selected[ $option['id'] ] ) ? ' checked' : '';
+			printf(
+				'<label class="pdlead-custom-field-choice"><input type="%1$s" name="%2$s" value="%3$s"%4$s /> %5$s</label>',
+				esc_attr( $input_tag ),
+				esc_attr( $opt_name ),
+				esc_attr( $option['id'] ),
+				esc_attr( $checked ),
+				esc_html( $option['label'] )
+			);
+		}
+
+		if ( empty( $selected_field['options'] ) ) {
+			echo '<p class="description">' . esc_html__( 'This field has no options in Pipedrive.', 'pipedrive-lead-forms' ) . '</p>';
+		} else {
+			echo '<p class="description">' . esc_html__( 'Select the value(s) to set on every new lead.', 'pipedrive-lead-forms' ) . '</p>';
 		}
 	}
 
