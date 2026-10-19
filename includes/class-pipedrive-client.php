@@ -23,6 +23,27 @@ class Pdlead_Pipedrive_Client {
 	const ORG_FIELDS_CACHE = 'pdlead_org_fields';
 
 	/**
+	 * Transient caching the lead custom fields of the connected account.
+	 */
+	const LEAD_FIELDS_CACHE = 'pdlead_lead_fields';
+
+	/**
+	 * Write format per Pipedrive custom field type, for the field types a form
+	 * value can be converted to. Other types (monetary, user, ...) are skipped.
+	 */
+	const CUSTOM_FIELD_FORMATS = array(
+		'varchar'      => 'string',
+		'varchar_auto' => 'string',
+		'text'         => 'string',
+		'phone'        => 'string',
+		'double'       => 'number',
+		'date'         => 'date',
+		'enum'         => 'enum',
+		'set'          => 'set',
+		'address'      => 'address',
+	);
+
+	/**
 	 * Optional API token override.
 	 *
 	 * @var string|null
@@ -248,23 +269,6 @@ class Pdlead_Pipedrive_Client {
 	 *                    (missing token or API error).
 	 */
 	public function get_organization_fields() {
-		$account = md5( $this->token() . '|' . $this->base_url( 'v2' ) );
-		$cached  = get_transient( self::ORG_FIELDS_CACHE );
-		if ( is_array( $cached ) && isset( $cached['account'], $cached['fields'] ) && $cached['account'] === $account ) {
-			return $cached['fields'];
-		}
-
-		$custom_formats = array(
-			'varchar'      => 'string',
-			'varchar_auto' => 'string',
-			'text'         => 'string',
-			'phone'        => 'string',
-			'double'       => 'number',
-			'date'         => 'date',
-			'enum'         => 'enum',
-			'set'          => 'set',
-			'address'      => 'address',
-		);
 		$system_formats = array(
 			'address'        => 'address',
 			'website'        => 'string',
@@ -273,8 +277,40 @@ class Pdlead_Pipedrive_Client {
 			'annual_revenue' => 'int',
 			'employee_count' => 'int',
 		);
+		return $this->cached_fields( self::ORG_FIELDS_CACHE, '/organizationFields', $system_formats );
+	}
 
-		$items = $this->get_fields( '/organizationFields' );
+	/**
+	 * Fetch the lead custom fields that a form field can be mapped to.
+	 *
+	 * Leads share their custom fields with deals. Only custom fields are
+	 * offered, which keeps the list short and avoids deal-only system fields.
+	 * Cached like the organization fields.
+	 *
+	 * @return array|null Same shape as get_organization_fields().
+	 */
+	public function get_lead_fields() {
+		return $this->cached_fields( self::LEAD_FIELDS_CACHE, '/dealFields', array() );
+	}
+
+	/**
+	 * Load the mappable fields of an entity, cached for an hour per account.
+	 *
+	 * @param string $cache          Transient name.
+	 * @param string $path           v2 fields endpoint, e.g. /dealFields.
+	 * @param array  $system_formats Writable system fields ( code => format ).
+	 * @return array|null List of fields ( each: code, name, format, custom,
+	 *                    options[ id, label ] ), or null when they could not
+	 *                    be loaded.
+	 */
+	private function cached_fields( $cache, $path, $system_formats ) {
+		$account = md5( $this->token() . '|' . $this->base_url( 'v2' ) );
+		$cached  = get_transient( $cache );
+		if ( is_array( $cached ) && isset( $cached['account'], $cached['fields'] ) && $cached['account'] === $account ) {
+			return $cached['fields'];
+		}
+
+		$items = $this->get_fields( $path );
 		if ( null === $items ) {
 			return null;
 		}
@@ -282,7 +318,7 @@ class Pdlead_Pipedrive_Client {
 		$fields = array();
 		foreach ( $items as $field ) {
 			if ( $field['custom'] ) {
-				$format = isset( $custom_formats[ $field['type'] ] ) ? $custom_formats[ $field['type'] ] : '';
+				$format = isset( self::CUSTOM_FIELD_FORMATS[ $field['type'] ] ) ? self::CUSTOM_FIELD_FORMATS[ $field['type'] ] : '';
 			} else {
 				$format = isset( $system_formats[ $field['code'] ] ) ? $system_formats[ $field['code'] ] : '';
 			}
@@ -299,7 +335,7 @@ class Pdlead_Pipedrive_Client {
 		}
 
 		set_transient(
-			self::ORG_FIELDS_CACHE,
+			$cache,
 			array(
 				'account' => $account,
 				'fields'  => $fields,
@@ -314,6 +350,13 @@ class Pdlead_Pipedrive_Client {
 	 */
 	public static function flush_organization_fields() {
 		delete_transient( self::ORG_FIELDS_CACHE );
+	}
+
+	/**
+	 * Drop the cached lead fields so the next lookup reloads them.
+	 */
+	public static function flush_lead_fields() {
+		delete_transient( self::LEAD_FIELDS_CACHE );
 	}
 
 	/**

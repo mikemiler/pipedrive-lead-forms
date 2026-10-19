@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.6.0
+Stable tag: 1.7.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -40,7 +40,14 @@ visitor gave marketing consent, so without consent nothing is sent. HandL keeps
 each parameter separately: a later visit with only utm_source updates
 utm_source and keeps the earlier utm_campaign.
 
-To keep a value out of Pipedrive, remove it with the `pdlead_tracking_data`
+The note is readable but cannot be filtered in Pipedrive. To report on campaign
+values, add a "Cookie value" field per value to the form: enter the cookie name
+(for example utm_source) in the Options / value column and map it to a Pipedrive
+lead field. Leads share their custom fields with deals, so create the fields in
+Pipedrive as deal fields first. Cookie value fields work with any plugin that
+stores values in first-party cookies, not only HandL.
+
+To keep a value out of the note, remove it with the `pdlead_tracking_data`
 filter:
 
 `add_filter( 'pdlead_tracking_data', function ( $data ) { unset( $data['gclid'] ); return $data; } );`
@@ -54,6 +61,13 @@ Updates are delivered via GitHub, not wordpress.org.
 3. Configure your Pipedrive API token and forms under the plugin settings.
 
 == Changelog ==
+
+= 1.7.0 =
+* New: map form fields to Pipedrive lead fields (the custom fields leads share with deals), next to the person and organization targets. Choice fields match the Pipedrive option labels. Values Pipedrive cannot accept are added to the lead note instead; if Pipedrive rejects the lead over a field value, the lead is created without the mapped lead fields and all their values go to the note, so no lead is lost.
+* New: Cookie value field type. It reads the value of a named cookie at submission (for example utm_source from HandL UTM Grabber) and can be mapped like any other field, so campaign data lands in real Pipedrive fields. The cookie name can be picked from the HandL UTM Grabber names or typed freely for any other plugin. Never shown to visitors and cannot be changed through the form.
+* Changed: "Test Pipedrive connection" also reloads the lead fields offered in the form editor.
+* Fix: a lead label, default owner or custom field value that no longer exists in the connected Pipedrive account (for example "Provided labelId does not exist" after a label was deleted or the API token was switched) no longer makes the submission fail. Saved lead labels are checked against Pipedrive before sending and unknown ones are skipped, so everything else still arrives. If Pipedrive still rejects the lead, it is created once more without labels, owner, custom field and mapped lead fields, and the mapped values go to the note. The settings page also points out saved lead labels that no longer exist.
+* New: the submission log shows a warning on sent leads when something did not reach Pipedrive as mapped: skipped labels, field values Pipedrive did not accept (listed by field), or what was dropped after a rejected lead.
 
 = 1.6.0 =
 * New: map form fields to Pipedrive organization fields, including custom fields and choice fields (Select options matching the Pipedrive option labels). Values Pipedrive cannot accept, and all values when an organization with the same name already exists, are added to the lead note instead. "Test Pipedrive connection" reloads the available organization fields.

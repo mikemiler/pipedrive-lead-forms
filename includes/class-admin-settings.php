@@ -412,7 +412,7 @@ class Pdlead_Admin_Settings {
 				<input type="hidden" name="action" value="pdlead_test_connection" />
 				<?php wp_nonce_field( 'pdlead_test_connection' ); ?>
 				<?php submit_button( __( 'Test Pipedrive connection', 'pipedrive-lead-forms' ), 'secondary', 'submit', false ); ?>
-				<p class="description"><?php esc_html_e( 'Calls /users/me with the saved token and reloads the Pipedrive organization fields offered in the form editor. Save your settings first.', 'pipedrive-lead-forms' ); ?></p>
+				<p class="description"><?php esc_html_e( 'Calls /users/me with the saved token and reloads the Pipedrive organization and lead fields offered in the form editor. Save your settings first.', 'pipedrive-lead-forms' ); ?></p>
 			</form>
 		</div>
 		<?php
@@ -425,7 +425,7 @@ class Pdlead_Admin_Settings {
 	 * the labels cannot be loaded (no token yet or an API error) only a hint is
 	 * shown and no field is emitted, so saving leaves the stored value untouched.
 	 * Stored IDs whose label does not exist in the connected account render no
-	 * control and are dropped by the sanitizer on save.
+	 * control and are dropped by the sanitizer on save; a hint points this out.
 	 *
 	 * @param array $s Current settings.
 	 */
@@ -461,6 +461,12 @@ class Pdlead_Admin_Settings {
 			echo '<p class="description">' . esc_html__( 'No lead labels found in Pipedrive.', 'pipedrive-lead-forms' ) . '</p>';
 		} else {
 			echo '<p class="description">' . esc_html__( 'Select the lead labels to add to every new lead.', 'pipedrive-lead-forms' ) . '</p>';
+		}
+
+		// Stale IDs (deleted in Pipedrive or from another account) make Pipedrive
+		// reject the labels, so new leads are created without them until saved.
+		if ( array_diff( $stored, array_column( $labels, 'id' ) ) ) {
+			echo '<p class="description">' . esc_html__( 'One or more saved lead labels do not exist in the connected Pipedrive account. New leads are created without labels until you save these settings, which removes them.', 'pipedrive-lead-forms' ) . '</p>';
 		}
 	}
 
@@ -569,8 +575,9 @@ class Pdlead_Admin_Settings {
 		}
 		check_admin_referer( 'pdlead_test_connection' );
 
-		// Also refreshes the organization fields offered in the form editor.
+		// Also refreshes the organization and lead fields offered in the form editor.
 		Pdlead_Pipedrive_Client::flush_organization_fields();
+		Pdlead_Pipedrive_Client::flush_lead_fields();
 
 		$client = new Pdlead_Pipedrive_Client();
 		$res    = $client->test_connection();

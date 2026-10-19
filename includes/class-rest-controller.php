@@ -34,12 +34,6 @@ class Pdlead_Rest_Controller {
 	);
 
 	/**
-	 * Tracking values that hold a complete URL. They keep their own percent
-	 * encoding and are sanitized as URLs.
-	 */
-	const TRACKING_URL_KEYS = array( 'handl_landing_page', 'handl_original_ref' );
-
-	/**
 	 * Maximum length of a single tracking value.
 	 */
 	const TRACKING_MAX_LENGTH = 500;
@@ -256,6 +250,12 @@ class Pdlead_Rest_Controller {
 					// ignored, so a visitor cannot tamper with it.
 					$payload[ $key ] = sanitize_text_field( isset( $field['options'] ) ? $field['options'] : '' );
 					break;
+				case 'cookie':
+					// Read from the cookie named in the form definition, never
+					// from the request fields.
+					$name            = preg_replace( '/[^A-Za-z0-9_.-]/', '', isset( $field['options'] ) ? (string) $field['options'] : '' );
+					$payload[ $key ] = self::clean_cookie_value( self::read_cookie( $name ) );
+					break;
 				case 'file':
 					// Files arrive via $_FILES, not the text params. The actual
 					// stored metadata is merged in later (see process_uploads).
@@ -273,24 +273,16 @@ class Pdlead_Rest_Controller {
 	/**
 	 * Collect the campaign tracking values from the request cookies.
 	 *
-	 * UTM values arrive query encoded when HandL wrote them in the browser
-	 * ("spring%20sale", "a+b") and plain when it wrote them on the server, so
-	 * one urldecode gives the same result for both. URL values are complete
-	 * URLs and are kept as they are.
-	 *
 	 * @param int $form_id Form post ID.
 	 * @return array<string,string> Sanitized values keyed by name, empty values dropped.
 	 */
 	private static function collect_tracking( $form_id ) {
 		$data = array();
 		foreach ( self::TRACKING_COOKIES as $name ) {
-			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Sanitized below, after the filter.
-			$value = isset( $_COOKIE[ $name ] ) ? wp_unslash( $_COOKIE[ $name ] ) : '';
-			if ( ! is_scalar( $value ) || '' === (string) $value ) {
-				continue;
+			$value = self::decode_cookie_value( self::read_cookie( $name ) );
+			if ( '' !== $value ) {
+				$data[ $name ] = $value;
 			}
-			$value         = (string) $value;
-			$data[ $name ] = in_array( $name, self::TRACKING_URL_KEYS, true ) ? $value : urldecode( $value );
 		}
 
 		// HandL fills a missing landing page with the URL of the current
@@ -315,8 +307,7 @@ class Pdlead_Rest_Controller {
 			if ( '' === $name || ! is_scalar( $value ) ) {
 				continue;
 			}
-			$value = in_array( $name, self::TRACKING_URL_KEYS, true ) ? esc_url_raw( (string) $value ) : sanitize_text_field( (string) $value );
-			$value = mb_substr( $value, 0, self::TRACKING_MAX_LENGTH );
+			$value = self::sanitize_cookie_value( (string) $value );
 			if ( '' === $value ) {
 				continue;
 			}
@@ -327,6 +318,66 @@ class Pdlead_Rest_Controller {
 		}
 
 		return $clean;
+	}
+
+	/**
+	 * Read a raw cookie value as sent by the browser.
+	 *
+	 * @param string $name Cookie name.
+	 * @return string Unslashed value, '' when missing or not a string.
+	 */
+	private static function read_cookie( $name ) {
+		if ( '' === $name || ! isset( $_COOKIE[ $name ] ) || ! is_scalar( $_COOKIE[ $name ] ) ) {
+			return '';
+		}
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Callers decode and sanitize the value.
+		return (string) wp_unslash( $_COOKIE[ $name ] );
+	}
+
+	/**
+	 * Undo the query encoding of a cookie value.
+	 *
+	 * HandL and similar plugins store UTM values query encoded when written in
+	 * the browser ("spring%20sale", "a+b") and plain when written on the
+	 * server, so one urldecode gives the same result for both. A complete URL
+	 * keeps its own percent encoding and is left as is.
+	 *
+	 * @param string $value Raw cookie value.
+	 * @return string
+	 */
+	private static function decode_cookie_value( $value ) {
+		return self::is_url( $value ) ? $value : urldecode( $value );
+	}
+
+	/**
+	 * Sanitize a decoded cookie value: URLs as URLs, everything else as text.
+	 *
+	 * @param string $value Decoded value.
+	 * @return string Sanitized value, cut to TRACKING_MAX_LENGTH.
+	 */
+	private static function sanitize_cookie_value( $value ) {
+		$value = self::is_url( $value ) ? esc_url_raw( $value ) : sanitize_text_field( $value );
+		return mb_substr( $value, 0, self::TRACKING_MAX_LENGTH );
+	}
+
+	/**
+	 * Decode and sanitize a raw cookie value in one step.
+	 *
+	 * @param string $value Raw cookie value.
+	 * @return string
+	 */
+	private static function clean_cookie_value( $value ) {
+		return self::sanitize_cookie_value( self::decode_cookie_value( $value ) );
+	}
+
+	/**
+	 * Whether a value is a complete http(s) URL.
+	 *
+	 * @param string $value Value.
+	 * @return bool
+	 */
+	private static function is_url( $value ) {
+		return 1 === preg_match( '#^https?://#i', $value );
 	}
 
 	/**

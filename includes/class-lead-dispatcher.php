@@ -41,6 +41,7 @@ class Pdlead_Lead_Dispatcher {
 			'org_name'    => '',
 			'lead_title'  => '',
 			'org_fields'  => array(),
+			'lead_fields' => array(),
 			'notes'       => array(),
 			'files'       => array(),
 			'tracking'    => array(),
@@ -108,6 +109,14 @@ class Pdlead_Lead_Dispatcher {
 							'label' => isset( $field['label'] ) ? $field['label'] : $key,
 							'value' => $value,
 						);
+					} elseif ( Pdlead_Form_CPT::is_lead_field_target( $map ) ) {
+						// Lead custom field, same shape (see build_lead_values).
+						$code = substr( $map, strlen( Pdlead_Form_CPT::LEAD_FIELD_PREFIX ) );
+
+						$mapped['lead_fields'][ $code ] = array(
+							'label' => isset( $field['label'] ) ? $field['label'] : $key,
+							'value' => $value,
+						);
 					}
 					break;
 			}
@@ -165,6 +174,9 @@ class Pdlead_Lead_Dispatcher {
 		$settings    = Pdlead_Settings::all();
 		// Pipedrive visible_to level shared by lead, person and organization. 0 = leave unset.
 		$visible_to = (int) $settings['visible_to'];
+		// What did not reach Pipedrive as intended. Kept in last_error of a
+		// sent row, so a broken mapping or a stale setting shows in the log.
+		$warnings = array();
 
 		// Step 1: organization (optional, only when a name was provided).
 		// Reuse an existing organization by name to avoid duplicates. Its data
@@ -195,6 +207,13 @@ class Pdlead_Lead_Dispatcher {
 					return self::handle_failure( $id, $row, $res );
 				}
 				$org_id = isset( $res['data']['data']['id'] ) ? (int) $res['data']['data']['id'] : 0;
+				if ( $leftover ) {
+					$warnings[] = sprintf(
+						/* translators: %s: comma separated form field labels. */
+						__( 'Organization fields not accepted by Pipedrive, values in note: %s', 'pipedrive-lead-forms' ),
+						implode( ', ', array_column( $leftover, 'label' ) )
+					);
+				}
 			}
 			foreach ( $leftover as $item ) {
 				$mapped['notes'][] = $item['label'] . ': ' . $item['value'];
@@ -252,21 +271,42 @@ class Pdlead_Lead_Dispatcher {
 
 		// Step 3: lead.
 		if ( '' === $lead_id ) {
-			$lead_payload = array(
+			$base = array(
 				'title'     => $mapped['lead_title'],
 				'person_id' => $person_id,
 			);
 			if ( $org_id ) {
-				$lead_payload['organization_id'] = $org_id;
-			}
-			if ( (int) $settings['owner_id'] > 0 ) {
-				$lead_payload['owner_id'] = (int) $settings['owner_id'];
+				$base['organization_id'] = $org_id;
 			}
 			if ( $visible_to > 0 ) {
 				// The leads endpoint is still v1, which expects visible_to as a string.
-				$lead_payload['visible_to'] = (string) $visible_to;
+				$base['visible_to'] = (string) $visible_to;
+			}
+
+			// Optional, account-scoped values. They are only validated when the
+			// settings are saved, so they can be stale (deleted in Pipedrive,
+			// token switched to another account, saved while the API was down).
+			$lead_payload = $base;
+			if ( (int) $settings['owner_id'] > 0 ) {
+				$lead_payload['owner_id'] = (int) $settings['owner_id'];
 			}
 			$label_ids = self::parse_id_list( $settings['label_ids'] );
+			if ( $label_ids ) {
+				// A label deleted in Pipedrive would make it reject the whole
+				// lead, so skip unknown labels and keep everything else.
+				$labels = $client->get_lead_labels();
+				if ( null !== $labels ) {
+					$unknown = array_diff( $label_ids, array_column( $labels, 'id' ) );
+					if ( $unknown ) {
+						$label_ids  = array_values( array_diff( $label_ids, $unknown ) );
+						$warnings[] = sprintf(
+							/* translators: %s: comma separated Pipedrive label IDs. */
+							__( 'Skipped lead labels that do not exist in Pipedrive (save the settings to remove them): %s', 'pipedrive-lead-forms' ),
+							implode( ', ', $unknown )
+						);
+					}
+				}
+			}
 			if ( $label_ids ) {
 				$lead_payload['label_ids'] = $label_ids;
 			}
@@ -278,9 +318,50 @@ class Pdlead_Lead_Dispatcher {
 				$lead_payload[ $cf_key ] = implode( ',', $cf_ids );
 			}
 
-			$res = $client->create_lead( $lead_payload );
+			// Mapped lead fields go on top, so a form mapping wins over the
+			// global custom field setting for the same field.
+			list( $lead_values, $leftover ) = self::build_lead_values( $mapped['lead_fields'], $client );
+
+			$lead_payload = array_merge( $lead_payload, $lead_values );
+			$res          = $client->create_lead( $lead_payload );
+			if ( ! $res['ok'] && ! $res['retryable'] && $lead_payload !== $base ) {
+				// The v1 leads endpoint rejects the whole lead over one bad
+				// value and does not reliably name it. Rather than losing the
+				// lead, create it with the base payload only, keep every mapped
+				// lead field value in the note and log what was dropped.
+				$dropped = array();
+				if ( isset( $lead_payload['owner_id'] ) ) {
+					$dropped[] = __( 'owner', 'pipedrive-lead-forms' );
+				}
+				if ( isset( $lead_payload['label_ids'] ) ) {
+					$dropped[] = __( 'labels', 'pipedrive-lead-forms' );
+				}
+				if ( '' !== $cf_key && isset( $lead_payload[ $cf_key ] ) && ! isset( $lead_values[ $cf_key ] ) ) {
+					$dropped[] = __( 'custom field from the settings', 'pipedrive-lead-forms' );
+				}
+				foreach ( array_keys( $lead_values ) as $code ) {
+					$dropped[] = $mapped['lead_fields'][ $code ]['label'];
+				}
+				$warnings[] = sprintf(
+					/* translators: 1: Pipedrive error message, 2: comma separated list of dropped values. */
+					__( 'Pipedrive rejected the lead (%1$s). Sent without: %2$s. Mapped field values are in the note.', 'pipedrive-lead-forms' ),
+					$res['error'],
+					implode( ', ', $dropped )
+				);
+				$res      = $client->create_lead( $base );
+				$leftover = $mapped['lead_fields'];
+			} elseif ( $leftover ) {
+				$warnings[] = sprintf(
+					/* translators: %s: comma separated form field labels. */
+					__( 'Lead fields not accepted by Pipedrive, values in note: %s', 'pipedrive-lead-forms' ),
+					implode( ', ', array_column( $leftover, 'label' ) )
+				);
+			}
 			if ( ! $res['ok'] ) {
 				return self::handle_failure( $id, $row, $res );
+			}
+			foreach ( $leftover as $item ) {
+				$mapped['notes'][] = $item['label'] . ': ' . $item['value'];
 			}
 			$lead_id = isset( $res['data']['data']['id'] ) ? (string) $res['data']['data']['id'] : '';
 			Pdlead_Submission_Store::update( $id, array( 'pipedrive_lead_id' => $lead_id ) );
@@ -317,7 +398,7 @@ class Pdlead_Lead_Dispatcher {
 			$id,
 			array(
 				'status'     => Pdlead_Submission_Store::STATUS_SENT,
-				'last_error' => '',
+				'last_error' => implode( '; ', $warnings ),
 			)
 		);
 
@@ -349,7 +430,7 @@ class Pdlead_Lead_Dispatcher {
 
 		$leftover = array();
 		foreach ( $org_fields as $code => $item ) {
-			$value = isset( $known[ $code ] ) ? self::org_field_value( $known[ $code ], $item['value'] ) : null;
+			$value = isset( $known[ $code ] ) ? self::field_value( $known[ $code ], $item['value'] ) : null;
 			if ( null === $value ) {
 				$leftover[ $code ] = $item;
 			} elseif ( $known[ $code ]['custom'] ) {
@@ -362,13 +443,53 @@ class Pdlead_Lead_Dispatcher {
 	}
 
 	/**
+	 * Convert the mapped lead field values to the v1 leads write format.
+	 *
+	 * Works like build_org_payload: a value that does not fit is returned as
+	 * leftover for the lead note. Choice values are sent as option ID strings
+	 * ("12" or "12,13"), the format the custom field setting already uses.
+	 *
+	 * @param array                   $lead_fields Mapped values keyed by field code ( label, value ).
+	 * @param Pdlead_Pipedrive_Client $client      API client.
+	 * @return array { 0: array values keyed by field code, 1: array leftover values keyed by field code }
+	 */
+	private static function build_lead_values( $lead_fields, $client ) {
+		if ( empty( $lead_fields ) ) {
+			return array( array(), array() );
+		}
+		$fields = $client->get_lead_fields();
+		if ( null === $fields ) {
+			return array( array(), $lead_fields );
+		}
+		$known = array_column( $fields, null, 'code' );
+
+		$values   = array();
+		$leftover = array();
+		foreach ( $lead_fields as $code => $item ) {
+			$value = isset( $known[ $code ] ) ? self::field_value( $known[ $code ], $item['value'] ) : null;
+			if ( null === $value ) {
+				$leftover[ $code ] = $item;
+				continue;
+			}
+			$format = $known[ $code ]['format'];
+			if ( 'enum' === $format || 'set' === $format ) {
+				$value = implode( ',', (array) $value );
+			} elseif ( 'address' === $format ) {
+				$value = $item['value'];
+			}
+			$values[ $code ] = $value;
+		}
+		return array( $values, $leftover );
+	}
+
+	/**
 	 * Convert a submitted value to the API v2 write format of a field.
 	 *
-	 * @param array  $field Organization field ( format, options ).
+	 * @param array  $field Organization or lead field ( format, options ).
 	 * @param string $raw   Submitted value, trimmed and not empty.
 	 * @return mixed Converted value, or null when the value does not fit.
 	 */
-	private static function org_field_value( $field, $raw ) {
+	private static function field_value( $field, $raw ) {
 		switch ( $field['format'] ) {
 			case 'string':
 				return $raw;

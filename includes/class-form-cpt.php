@@ -27,6 +27,12 @@ class Pdlead_Form_CPT {
 	const ORG_FIELD_PREFIX = 'org_field:';
 
 	/**
+	 * Prefix of map_to values that target a Pipedrive lead custom field; the
+	 * field code follows, e.g. "lead_field:abc123".
+	 */
+	const LEAD_FIELD_PREFIX = 'lead_field:';
+
+	/**
 	 * Reserved payload key holding the campaign tracking values of a
 	 * submission. No form field may use it as its key.
 	 */
@@ -48,6 +54,7 @@ class Pdlead_Form_CPT {
 			'consent'  => __( 'Consent checkbox', 'pipedrive-lead-forms' ),
 			'file'     => __( 'File Upload', 'pipedrive-lead-forms' ),
 			'hidden'   => __( 'Hidden (fixed value)', 'pipedrive-lead-forms' ),
+			'cookie'   => __( 'Cookie value', 'pipedrive-lead-forms' ),
 		);
 	}
 
@@ -78,6 +85,27 @@ class Pdlead_Form_CPT {
 	 */
 	public static function is_org_field_target( $map ) {
 		return 1 === preg_match( '/^' . preg_quote( self::ORG_FIELD_PREFIX, '/' ) . '[A-Za-z0-9_]+$/', (string) $map );
+	}
+
+	/**
+	 * Whether a map_to value is a well-formed lead field target.
+	 *
+	 * @param string $map Mapping target.
+	 * @return bool
+	 */
+	public static function is_lead_field_target( $map ) {
+		return 1 === preg_match( '/^' . preg_quote( self::LEAD_FIELD_PREFIX, '/' ) . '[A-Za-z0-9_]+$/', (string) $map );
+	}
+
+	/**
+	 * Whether a field type takes its value on the server instead of from the
+	 * visitor. Such fields are never rendered and never required.
+	 *
+	 * @param string $type Field type.
+	 * @return bool
+	 */
+	public static function is_server_value_type( $type ) {
+		return 'hidden' === $type || 'cookie' === $type;
 	}
 
 	/**
@@ -239,8 +267,12 @@ class Pdlead_Form_CPT {
 	public static function render_meta_box( $post ) {
 		wp_nonce_field( 'pdlead_save_fields', 'pdlead_fields_nonce' );
 
-		$fields     = self::get_fields( $post->ID );
-		$org_fields = ( new Pdlead_Pipedrive_Client() )->get_organization_fields();
+		$fields    = self::get_fields( $post->ID );
+		$client    = new Pdlead_Pipedrive_Client();
+		$pd_fields = array(
+			'org'  => $client->get_organization_fields(),
+			'lead' => $client->get_lead_fields(),
+		);
 		if ( empty( $fields ) ) {
 			// Sensible starter set for a new form.
 			$fields = array(
@@ -270,9 +302,10 @@ class Pdlead_Form_CPT {
 
 		echo '<p class="description">' . esc_html__( 'Define the fields shown in the form and how each maps to Pipedrive. At least one field should map to Person: Email.', 'pipedrive-lead-forms' ) . '</p>';
 		echo '<p class="description">' . esc_html__( 'Organization fields are only sent when a field maps to Organization: Name. For Pipedrive choice fields use a Select field whose options match the Pipedrive option labels. Values Pipedrive cannot accept, and all values when an organization with the same name already exists, are added to the lead note instead.', 'pipedrive-lead-forms' ) . '</p>';
-		echo '<p class="description">' . esc_html__( 'For Hidden fields, enter the fixed value in the Options / value column. It is sent with every submission and never shown to the visitor.', 'pipedrive-lead-forms' ) . '</p>';
-		if ( null === $org_fields ) {
-			echo '<p class="description">' . esc_html__( 'Pipedrive organization fields could not be loaded. Save a valid API token and run "Test Pipedrive connection" in the settings to map form fields to them.', 'pipedrive-lead-forms' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Lead fields are the custom fields leads share with deals in Pipedrive. Values Pipedrive cannot accept are added to the lead note instead.', 'pipedrive-lead-forms' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'For Hidden fields, enter the fixed value in the Options / value column. For Cookie value fields, pick the cookie to read from the suggestions (HandL UTM Grabber names) or type any other cookie name. Both are added on the server at submission and never shown to the visitor.', 'pipedrive-lead-forms' ) . '</p>';
+		if ( null === $pd_fields['org'] || null === $pd_fields['lead'] ) {
+			echo '<p class="description">' . esc_html__( 'Pipedrive organization or lead fields could not be loaded. Save a valid API token and run "Test Pipedrive connection" in the settings to map form fields to them.', 'pipedrive-lead-forms' ) . '</p>';
 		}
 
 		echo '<table class="widefat pdlead-fields-table" id="pdlead-fields-table"><thead><tr>';
@@ -287,10 +320,16 @@ class Pdlead_Form_CPT {
 		echo '</tr></thead><tbody>';
 
 		foreach ( $fields as $field ) {
-			self::render_field_row( $field, $org_fields );
+			self::render_field_row( $field, $pd_fields );
 		}
 
 		echo '</tbody></table>';
+
+		echo '<datalist id="pdlead-cookie-names">';
+		foreach ( Pdlead_Rest_Controller::TRACKING_COOKIES as $cookie_name ) {
+			echo '<option value="' . esc_attr( $cookie_name ) . '"></option>';
+		}
+		echo '</datalist>';
 
 		echo '<p><button type="button" class="button" id="pdlead-add-field">' . esc_html__( 'Add field', 'pipedrive-lead-forms' ) . '</button></p>';
 
@@ -318,17 +357,17 @@ class Pdlead_Form_CPT {
 
 		// Hidden template row used by the repeater script.
 		echo '<script type="text/html" id="pdlead-field-template">';
-		self::render_field_row( array(), $org_fields );
+		self::render_field_row( array(), $pd_fields );
 		echo '</script>';
 	}
 
 	/**
 	 * Render a single editable field row.
 	 *
-	 * @param array      $field      Field data.
-	 * @param array|null $org_fields Pipedrive organization fields, or null when unavailable.
+	 * @param array $field     Field data.
+	 * @param array $pd_fields Pipedrive fields ( org, lead ), each null when unavailable.
 	 */
-	private static function render_field_row( $field, $org_fields ) {
+	private static function render_field_row( $field, $pd_fields ) {
 		$field = wp_parse_args(
 			$field,
 			array(
@@ -361,13 +400,35 @@ class Pdlead_Form_CPT {
 		echo '<option value="yes" ' . selected( $field['required'], 'yes', false ) . '>' . esc_html__( 'Yes', 'pipedrive-lead-forms' ) . '</option>';
 		echo '</select></td>';
 
-		echo '<td><input type="text" name="pdlead_field_options[]" value="' . esc_attr( $field['options'] ) . '" class="widefat" /></td>';
+		// Cookie value rows suggest the known cookie names but still accept any
+		// name; admin-forms.js keeps the list attribute in sync with the type.
+		$list = 'cookie' === $field['type'] ? ' list="pdlead-cookie-names"' : '';
+		echo '<td><input type="text" name="pdlead_field_options[]" value="' . esc_attr( $field['options'] ) . '" class="widefat"' . $list . ' /></td>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- $list is a fixed attribute string.
 
 		echo '<td><select name="pdlead_field_map[]">';
 		foreach ( self::map_targets() as $value => $label ) {
 			echo '<option value="' . esc_attr( $value ) . '" ' . selected( $field['map_to'], $value, false ) . '>' . esc_html( $label ) . '</option>';
 		}
-		self::render_org_field_options( $field['map_to'], $org_fields );
+		self::render_target_options(
+			$field['map_to'],
+			$pd_fields['org'],
+			self::ORG_FIELD_PREFIX,
+			__( 'Pipedrive organization fields', 'pipedrive-lead-forms' ),
+			/* translators: %s: Pipedrive organization field name. */
+			__( 'Organization: %s', 'pipedrive-lead-forms' ),
+			/* translators: %s: Pipedrive organization field code. */
+			__( 'Organization: %s (not available)', 'pipedrive-lead-forms' )
+		);
+		self::render_target_options(
+			$field['map_to'],
+			$pd_fields['lead'],
+			self::LEAD_FIELD_PREFIX,
+			__( 'Pipedrive lead fields', 'pipedrive-lead-forms' ),
+			/* translators: %s: Pipedrive lead field name. */
+			__( 'Lead: %s', 'pipedrive-lead-forms' ),
+			/* translators: %s: Pipedrive lead field code. */
+			__( 'Lead: %s (not available)', 'pipedrive-lead-forms' )
+		);
 		echo '</select></td>';
 
 		echo '<td><button type="button" class="button-link pdlead-remove-field" aria-label="' . esc_attr__( 'Remove field', 'pipedrive-lead-forms' ) . '">&times;</button></td>';
@@ -386,28 +447,32 @@ class Pdlead_Form_CPT {
 	}
 
 	/**
-	 * Render the organization field mapping targets as an option group.
+	 * Render the mapping targets of one Pipedrive entity as an option group.
 	 *
 	 * Choice fields carry their option labels in data-pdlead-options so the
 	 * editor script can prefill the Options column. A stored target that is not
 	 * in the loaded list (API unavailable, or the field was deleted in
 	 * Pipedrive) is still rendered, so saving the form never drops it.
 	 *
-	 * @param string     $current    Stored map_to value of the row.
-	 * @param array|null $org_fields Pipedrive organization fields, or null when unavailable.
+	 * @param string     $current        Stored map_to value of the row.
+	 * @param array|null $fields         Pipedrive fields, or null when unavailable.
+	 * @param string     $prefix         Target prefix, ORG_FIELD_PREFIX or LEAD_FIELD_PREFIX.
+	 * @param string     $group_label    Option group label.
+	 * @param string     $label_format   Option label, %s is the field name.
+	 * @param string     $missing_format Label of an unavailable target, %s is the field code.
 	 */
-	private static function render_org_field_options( $current, $org_fields ) {
+	private static function render_target_options( $current, $fields, $prefix, $group_label, $label_format, $missing_format ) {
 		$found = false;
 		$html  = '';
-		foreach ( (array) $org_fields as $org_field ) {
-			$value = self::ORG_FIELD_PREFIX . $org_field['code'];
+		foreach ( (array) $fields as $pd_field ) {
+			$value = $prefix . $pd_field['code'];
 			$found = $found || $value === $current;
 
 			$data = '';
-			if ( $org_field['options'] ) {
+			if ( $pd_field['options'] ) {
 				// Labels containing a comma can never match, the Options column is comma separated.
 				$labels = array_filter(
-					array_column( $org_field['options'], 'label' ),
+					array_column( $pd_field['options'], 'label' ),
 					static function ( $label ) {
 						return false === strpos( $label, ',' );
 					}
@@ -415,20 +480,17 @@ class Pdlead_Form_CPT {
 				$data   = ' data-pdlead-options="' . esc_attr( implode( ', ', $labels ) ) . '"';
 			}
 
-			/* translators: %s: Pipedrive organization field name. */
-			$label = sprintf( __( 'Organization: %s', 'pipedrive-lead-forms' ), $org_field['name'] );
+			$label = sprintf( $label_format, $pd_field['name'] );
 			$html .= '<option value="' . esc_attr( $value ) . '"' . $data . ' ' . selected( $current, $value, false ) . '>' . esc_html( $label ) . '</option>';
 		}
 
-		if ( ! $found && self::is_org_field_target( $current ) ) {
-			$code = substr( $current, strlen( self::ORG_FIELD_PREFIX ) );
-			/* translators: %s: Pipedrive organization field code. */
-			$label = sprintf( __( 'Organization: %s (not available)', 'pipedrive-lead-forms' ), $code );
+		if ( ! $found && 0 === strpos( (string) $current, $prefix ) ) {
+			$label = sprintf( $missing_format, substr( $current, strlen( $prefix ) ) );
 			$html .= '<option value="' . esc_attr( $current ) . '" selected="selected">' . esc_html( $label ) . '</option>';
 		}
 
 		if ( '' !== $html ) {
-			echo '<optgroup label="' . esc_attr__( 'Pipedrive organization fields', 'pipedrive-lead-forms' ) . '">' . $html . '</optgroup>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- every part of $html is escaped above.
+			echo '<optgroup label="' . esc_attr( $group_label ) . '">' . $html . '</optgroup>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- every part of $html is escaped above.
 		}
 	}
 
@@ -475,7 +537,7 @@ class Pdlead_Form_CPT {
 			}
 
 			$type = isset( $types[ $i ] ) && in_array( $types[ $i ], $valid_types, true ) ? $types[ $i ] : 'text';
-			$map  = isset( $maps[ $i ] ) && ( in_array( $maps[ $i ], $valid_maps, true ) || self::is_org_field_target( $maps[ $i ] ) ) ? $maps[ $i ] : 'none';
+			$map  = isset( $maps[ $i ] ) && ( in_array( $maps[ $i ], $valid_maps, true ) || self::is_org_field_target( $maps[ $i ] ) || self::is_lead_field_target( $maps[ $i ] ) ) ? $maps[ $i ] : 'none';
 
 			// Derive a unique key from the provided key or the label.
 			$key = isset( $keys[ $i ] ) ? sanitize_key( $keys[ $i ] ) : '';
@@ -497,8 +559,8 @@ class Pdlead_Form_CPT {
 				'key'          => $key,
 				'label'        => $label,
 				'type'         => $type,
-				// A hidden value comes from this configuration, so it is never required.
-				'required'     => ( 'hidden' !== $type && isset( $required[ $i ] ) && 'yes' === $required[ $i ] ) ? 'yes' : 'no',
+				// A server-side value is not entered by the visitor, so it is never required.
+				'required'     => ( ! self::is_server_value_type( $type ) && isset( $required[ $i ] ) && 'yes' === $required[ $i ] ) ? 'yes' : 'no',
 				'options'      => isset( $options[ $i ] ) ? sanitize_text_field( $options[ $i ] ) : '',
 				'map_to'       => $map,
 				'consent_text' => isset( $consents[ $i ] ) ? wp_kses_post( $consents[ $i ] ) : '',

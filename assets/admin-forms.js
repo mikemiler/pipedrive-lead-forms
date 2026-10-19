@@ -69,6 +69,35 @@
 		consentRow.classList.toggle( 'pdlead-consent-hidden', ! isConsent );
 	}
 
+	/**
+	 * Suggest the known cookie names in the Options / value column of cookie
+	 * value rows only. Typing any other name stays possible.
+	 *
+	 * @param {HTMLElement} row Field row.
+	 */
+	function toggleCookieList( row ) {
+		var type = row.querySelector( 'select[name="pdlead_field_type[]"]' );
+		var input = row.querySelector( 'input[name="pdlead_field_options[]"]' );
+		if ( ! type || ! input ) {
+			return;
+		}
+		if ( type.value === 'cookie' ) {
+			input.setAttribute( 'list', 'pdlead-cookie-names' );
+		} else {
+			input.removeAttribute( 'list' );
+		}
+	}
+
+	/**
+	 * Apply everything that depends on the selected field type.
+	 *
+	 * @param {HTMLElement} row Field row.
+	 */
+	function syncType( row ) {
+		toggleConsent( row );
+		toggleCookieList( row );
+	}
+
 	function addRow() {
 		var body = document.querySelector( '#pdlead-fields-table tbody' );
 		if ( ! body ) {
@@ -83,7 +112,7 @@
 			if ( consentRow ) {
 				body.appendChild( consentRow );
 			}
-			toggleConsent( fieldRow );
+			syncType( fieldRow );
 		}
 	}
 
@@ -112,8 +141,8 @@
 	/**
 	 * Prefill an empty Options column when a Pipedrive choice field is chosen
 	 * as mapping target, and switch the field to a Select, so the submitted
-	 * value matches a Pipedrive option label. Hidden fields are left alone:
-	 * their single fixed value is typed in manually.
+	 * value matches a Pipedrive option label. Hidden and cookie fields are left
+	 * alone: their value or cookie name is typed in manually.
 	 *
 	 * @param {HTMLElement} row Field row.
 	 */
@@ -123,13 +152,13 @@
 		var type = row.querySelector( 'select[name="pdlead_field_type[]"]' );
 		var selected = map ? map.options[ map.selectedIndex ] : null;
 		var labels = selected ? selected.getAttribute( 'data-pdlead-options' ) : null;
-		if ( ! labels || ! input || input.value.trim() !== '' || ( type && type.value === 'hidden' ) ) {
+		if ( ! labels || ! input || input.value.trim() !== '' || ( type && ( type.value === 'hidden' || type.value === 'cookie' ) ) ) {
 			return;
 		}
 		input.value = labels;
 		if ( type ) {
 			type.value = 'select';
-			toggleConsent( row );
+			syncType( row );
 		}
 	}
 
@@ -139,7 +168,7 @@
 			return;
 		}
 		if ( event.target.name === 'pdlead_field_type[]' ) {
-			toggleConsent( row );
+			syncType( row );
 		}
 		if ( event.target.name === 'pdlead_field_map[]' ) {
 			prefillOptions( row );
@@ -206,7 +235,7 @@
 
 		// Apply the initial visibility to rows rendered on the server.
 		var rows = document.querySelectorAll( '#pdlead-fields-table .pdlead-field-row' );
-		Array.prototype.forEach.call( rows, toggleConsent );
+		Array.prototype.forEach.call( rows, syncType );
 
 		initSortable();
 	} );

@@ -163,9 +163,9 @@ class Pdlead_Form_Renderer {
 		$req_attr = $required ? ' required' : '';
 		$req_mark = $required ? ' <span class="pdlead-req" aria-hidden="true">*</span>' : '';
 
-		// The hidden value is added on the server at submission, so nothing is
-		// rendered: visitors can neither see nor change it.
-		if ( 'hidden' === $type ) {
+		// Hidden and cookie values are added on the server at submission, so
+		// nothing is rendered: visitors can neither see nor change them.
+		if ( Pdlead_Form_CPT::is_server_value_type( $type ) ) {
 			return '';
 		}
 

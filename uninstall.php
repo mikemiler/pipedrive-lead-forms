@@ -21,6 +21,7 @@ delete_option( 'pdlead_settings' );
 delete_option( 'pdlead_db_version' );
 delete_option( 'pdlead_hmac_secret' );
 delete_transient( 'pdlead_org_fields' );
+delete_transient( 'pdlead_lead_fields' );
 
 // Remove form definitions and their meta.
 $pdlead_forms = get_posts(
