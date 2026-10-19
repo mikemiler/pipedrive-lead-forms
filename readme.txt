@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.5.0
+Stable tag: 1.6.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -23,6 +23,28 @@ types and set a maximum file size in the settings. Uploaded files are stored in
 a protected directory, attached to the backup email and attached to the
 Pipedrive lead.
 
+A Hidden field type sends a fixed value with every submission, for example to
+prefill a Pipedrive organization field. The value is set in the form editor,
+added on the server and never shown to the visitor.
+
+= Campaign tracking (UTM) =
+
+When HandL UTM Grabber is active, every submission carries the campaign values
+it stores in the visitor's browser: utm_source, utm_medium, utm_campaign,
+utm_term, utm_content, gclid, handl_landing_page and handl_original_ref. They
+are read when the form is submitted and appear as a "Tracking" block in the
+Pipedrive lead note, the backup email and the submission log.
+
+The plugin never sets cookies itself. HandL only stores these values after the
+visitor gave marketing consent, so without consent nothing is sent. HandL keeps
+each parameter separately: a later visit with only utm_source updates
+utm_source and keeps the earlier utm_campaign.
+
+To keep a value out of Pipedrive, remove it with the `pdlead_tracking_data`
+filter:
+
+`add_filter( 'pdlead_tracking_data', function ( $data ) { unset( $data['gclid'] ); return $data; } );`
+
 Updates are delivered via GitHub, not wordpress.org.
 
 == Installation ==
@@ -32,6 +54,13 @@ Updates are delivered via GitHub, not wordpress.org.
 3. Configure your Pipedrive API token and forms under the plugin settings.
 
 == Changelog ==
+
+= 1.6.0 =
+* New: map form fields to Pipedrive organization fields, including custom fields and choice fields (Select options matching the Pipedrive option labels). Values Pipedrive cannot accept, and all values when an organization with the same name already exists, are added to the lead note instead. "Test Pipedrive connection" reloads the available organization fields.
+* Changed: organizations and persons are created through the Pipedrive API v2, as their v1 endpoints are out of support. Leads, notes, files, labels and users stay on v1.
+* New: Hidden field type. Its fixed value is set in the form editor (Options / value column), added on the server at submission and never shown to visitors, so it cannot be changed from the browser.
+* New: campaign tracking. The UTM values, gclid, landing page and original referrer stored by HandL UTM Grabber are attached to every submission and shown as a "Tracking" block in the lead note, the backup email and the submission log. The plugin only reads existing cookies and never sets any.
+* New: filter `pdlead_tracking_data` to change or remove tracking values before they are stored and sent.
 
 = 1.5.0 =
 * New: custom field support. Pick one of your Pipedrive custom option fields (leads share them with deals) and its value(s) in the settings; every new lead is created with that field set. Single-choice fields render as radios, multi-choice fields as checkboxes.

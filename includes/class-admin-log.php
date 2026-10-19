@@ -170,6 +170,17 @@ class Pdlead_Admin_Log {
 									<summary><?php esc_html_e( 'View', 'pipedrive-lead-forms' ); ?></summary>
 									<dl class="pdlead-payload">
 										<?php foreach ( $payload as $key => $value ) : ?>
+											<?php if ( Pdlead_Form_CPT::TRACKING_KEY === $key ) : ?>
+												<?php if ( is_array( $value ) ) : ?>
+													<dt><?php esc_html_e( 'Tracking', 'pipedrive-lead-forms' ); ?></dt>
+													<dd>
+														<?php foreach ( $value as $name => $item ) : ?>
+															<?php echo esc_html( $name . ': ' . ( is_scalar( $item ) ? $item : '' ) ); ?><br />
+														<?php endforeach; ?>
+													</dd>
+												<?php endif; ?>
+												<?php continue; ?>
+											<?php endif; ?>
 											<dt><?php echo esc_html( $key ); ?></dt>
 											<dd>
 													<?php if ( is_array( $value ) ) : ?>

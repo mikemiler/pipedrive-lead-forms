@@ -21,6 +21,18 @@ class Pdlead_Form_CPT {
 	const META_SENDING_MSG    = '_pdlead_sending_message';
 
 	/**
+	 * Prefix of map_to values that target a Pipedrive organization field; the
+	 * field code follows, e.g. "org_field:website".
+	 */
+	const ORG_FIELD_PREFIX = 'org_field:';
+
+	/**
+	 * Reserved payload key holding the campaign tracking values of a
+	 * submission. No form field may use it as its key.
+	 */
+	const TRACKING_KEY = '_tracking';
+
+	/**
 	 * Supported field types.
 	 *
 	 * @return array
@@ -35,6 +47,7 @@ class Pdlead_Form_CPT {
 			'checkbox' => __( 'Checkbox', 'pipedrive-lead-forms' ),
 			'consent'  => __( 'Consent checkbox', 'pipedrive-lead-forms' ),
 			'file'     => __( 'File Upload', 'pipedrive-lead-forms' ),
+			'hidden'   => __( 'Hidden (fixed value)', 'pipedrive-lead-forms' ),
 		);
 	}
 
@@ -55,6 +68,16 @@ class Pdlead_Form_CPT {
 			'file'        => __( 'Lead: File attachment', 'pipedrive-lead-forms' ),
 			'consent'     => __( 'Consent (not sent)', 'pipedrive-lead-forms' ),
 		);
+	}
+
+	/**
+	 * Whether a map_to value is a well-formed organization field target.
+	 *
+	 * @param string $map Mapping target.
+	 * @return bool
+	 */
+	public static function is_org_field_target( $map ) {
+		return 1 === preg_match( '/^' . preg_quote( self::ORG_FIELD_PREFIX, '/' ) . '[A-Za-z0-9_]+$/', (string) $map );
 	}
 
 	/**
@@ -216,7 +239,8 @@ class Pdlead_Form_CPT {
 	public static function render_meta_box( $post ) {
 		wp_nonce_field( 'pdlead_save_fields', 'pdlead_fields_nonce' );
 
-		$fields = self::get_fields( $post->ID );
+		$fields     = self::get_fields( $post->ID );
+		$org_fields = ( new Pdlead_Pipedrive_Client() )->get_organization_fields();
 		if ( empty( $fields ) ) {
 			// Sensible starter set for a new form.
 			$fields = array(
@@ -245,6 +269,11 @@ class Pdlead_Form_CPT {
 		}
 
 		echo '<p class="description">' . esc_html__( 'Define the fields shown in the form and how each maps to Pipedrive. At least one field should map to Person: Email.', 'pipedrive-lead-forms' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Organization fields are only sent when a field maps to Organization: Name. For Pipedrive choice fields use a Select field whose options match the Pipedrive option labels. Values Pipedrive cannot accept, and all values when an organization with the same name already exists, are added to the lead note instead.', 'pipedrive-lead-forms' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'For Hidden fields, enter the fixed value in the Options / value column. It is sent with every submission and never shown to the visitor.', 'pipedrive-lead-forms' ) . '</p>';
+		if ( null === $org_fields ) {
+			echo '<p class="description">' . esc_html__( 'Pipedrive organization fields could not be loaded. Save a valid API token and run "Test Pipedrive connection" in the settings to map form fields to them.', 'pipedrive-lead-forms' ) . '</p>';
+		}
 
 		echo '<table class="widefat pdlead-fields-table" id="pdlead-fields-table"><thead><tr>';
 		echo '<th class="pdlead-handle-col"><span class="screen-reader-text">' . esc_html__( 'Reorder', 'pipedrive-lead-forms' ) . '</span></th>';
@@ -252,13 +281,13 @@ class Pdlead_Form_CPT {
 		echo '<th>' . esc_html__( 'Key', 'pipedrive-lead-forms' ) . '</th>';
 		echo '<th>' . esc_html__( 'Type', 'pipedrive-lead-forms' ) . '</th>';
 		echo '<th>' . esc_html__( 'Required', 'pipedrive-lead-forms' ) . '</th>';
-		echo '<th>' . esc_html__( 'Options (comma separated)', 'pipedrive-lead-forms' ) . '</th>';
+		echo '<th>' . esc_html__( 'Options / value', 'pipedrive-lead-forms' ) . '</th>';
 		echo '<th>' . esc_html__( 'Maps to', 'pipedrive-lead-forms' ) . '</th>';
 		echo '<th></th>';
 		echo '</tr></thead><tbody>';
 
 		foreach ( $fields as $field ) {
-			self::render_field_row( $field );
+			self::render_field_row( $field, $org_fields );
 		}
 
 		echo '</tbody></table>';
@@ -289,16 +318,17 @@ class Pdlead_Form_CPT {
 
 		// Hidden template row used by the repeater script.
 		echo '<script type="text/html" id="pdlead-field-template">';
-		self::render_field_row( array() );
+		self::render_field_row( array(), $org_fields );
 		echo '</script>';
 	}
 
 	/**
 	 * Render a single editable field row.
 	 *
-	 * @param array $field Field data.
+	 * @param array      $field      Field data.
+	 * @param array|null $org_fields Pipedrive organization fields, or null when unavailable.
 	 */
-	private static function render_field_row( $field ) {
+	private static function render_field_row( $field, $org_fields ) {
 		$field = wp_parse_args(
 			$field,
 			array(
@@ -337,6 +367,7 @@ class Pdlead_Form_CPT {
 		foreach ( self::map_targets() as $value => $label ) {
 			echo '<option value="' . esc_attr( $value ) . '" ' . selected( $field['map_to'], $value, false ) . '>' . esc_html( $label ) . '</option>';
 		}
+		self::render_org_field_options( $field['map_to'], $org_fields );
 		echo '</select></td>';
 
 		echo '<td><button type="button" class="button-link pdlead-remove-field" aria-label="' . esc_attr__( 'Remove field', 'pipedrive-lead-forms' ) . '">&times;</button></td>';
@@ -352,6 +383,53 @@ class Pdlead_Form_CPT {
 		echo '<textarea name="pdlead_field_consent[]" rows="2" class="widefat pdlead-consent-text" placeholder="' . esc_attr__( 'HTML links allowed, e.g. I accept the <a href="/privacy">privacy policy</a>.', 'pipedrive-lead-forms' ) . '">' . esc_textarea( $field['consent_text'] ) . '</textarea>';
 		echo '</label></td>';
 		echo '</tr>';
+	}
+
+	/**
+	 * Render the organization field mapping targets as an option group.
+	 *
+	 * Choice fields carry their option labels in data-pdlead-options so the
+	 * editor script can prefill the Options column. A stored target that is not
+	 * in the loaded list (API unavailable, or the field was deleted in
+	 * Pipedrive) is still rendered, so saving the form never drops it.
+	 *
+	 * @param string     $current    Stored map_to value of the row.
+	 * @param array|null $org_fields Pipedrive organization fields, or null when unavailable.
+	 */
+	private static function render_org_field_options( $current, $org_fields ) {
+		$found = false;
+		$html  = '';
+		foreach ( (array) $org_fields as $org_field ) {
+			$value = self::ORG_FIELD_PREFIX . $org_field['code'];
+			$found = $found || $value === $current;
+
+			$data = '';
+			if ( $org_field['options'] ) {
+				// Labels containing a comma can never match, the Options column is comma separated.
+				$labels = array_filter(
+					array_column( $org_field['options'], 'label' ),
+					static function ( $label ) {
+						return false === strpos( $label, ',' );
+					}
+				);
+				$data   = ' data-pdlead-options="' . esc_attr( implode( ', ', $labels ) ) . '"';
+			}
+
+			/* translators: %s: Pipedrive organization field name. */
+			$label = sprintf( __( 'Organization: %s', 'pipedrive-lead-forms' ), $org_field['name'] );
+			$html .= '<option value="' . esc_attr( $value ) . '"' . $data . ' ' . selected( $current, $value, false ) . '>' . esc_html( $label ) . '</option>';
+		}
+
+		if ( ! $found && self::is_org_field_target( $current ) ) {
+			$code = substr( $current, strlen( self::ORG_FIELD_PREFIX ) );
+			/* translators: %s: Pipedrive organization field code. */
+			$label = sprintf( __( 'Organization: %s (not available)', 'pipedrive-lead-forms' ), $code );
+			$html .= '<option value="' . esc_attr( $current ) . '" selected="selected">' . esc_html( $label ) . '</option>';
+		}
+
+		if ( '' !== $html ) {
+			echo '<optgroup label="' . esc_attr__( 'Pipedrive organization fields', 'pipedrive-lead-forms' ) . '">' . $html . '</optgroup>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- every part of $html is escaped above.
+		}
 	}
 
 	/**
@@ -383,9 +461,10 @@ class Pdlead_Form_CPT {
 		$maps     = isset( $_POST['pdlead_field_map'] ) ? (array) wp_unslash( $_POST['pdlead_field_map'] ) : array();
 		$consents = isset( $_POST['pdlead_field_consent'] ) ? (array) wp_unslash( $_POST['pdlead_field_consent'] ) : array();
 
+		// $used_keys is seeded with the reserved tracking key so no field can claim it.
 		$valid_types = array_keys( self::field_types() );
 		$valid_maps  = array_keys( self::map_targets() );
-		$used_keys   = array();
+		$used_keys   = array( self::TRACKING_KEY => true );
 		$fields      = array();
 
 		$count = count( $labels );
@@ -396,7 +475,7 @@ class Pdlead_Form_CPT {
 			}
 
 			$type = isset( $types[ $i ] ) && in_array( $types[ $i ], $valid_types, true ) ? $types[ $i ] : 'text';
-			$map  = isset( $maps[ $i ] ) && in_array( $maps[ $i ], $valid_maps, true ) ? $maps[ $i ] : 'none';
+			$map  = isset( $maps[ $i ] ) && ( in_array( $maps[ $i ], $valid_maps, true ) || self::is_org_field_target( $maps[ $i ] ) ) ? $maps[ $i ] : 'none';
 
 			// Derive a unique key from the provided key or the label.
 			$key = isset( $keys[ $i ] ) ? sanitize_key( $keys[ $i ] ) : '';
@@ -418,7 +497,8 @@ class Pdlead_Form_CPT {
 				'key'          => $key,
 				'label'        => $label,
 				'type'         => $type,
-				'required'     => ( isset( $required[ $i ] ) && 'yes' === $required[ $i ] ) ? 'yes' : 'no',
+				// A hidden value comes from this configuration, so it is never required.
+				'required'     => ( 'hidden' !== $type && isset( $required[ $i ] ) && 'yes' === $required[ $i ] ) ? 'yes' : 'no',
 				'options'      => isset( $options[ $i ] ) ? sanitize_text_field( $options[ $i ] ) : '',
 				'map_to'       => $map,
 				'consent_text' => isset( $consents[ $i ] ) ? wp_kses_post( $consents[ $i ] ) : '',

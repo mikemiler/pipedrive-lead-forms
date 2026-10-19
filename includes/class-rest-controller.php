@@ -18,6 +18,38 @@ class Pdlead_Rest_Controller {
 	const NAMESPACE = 'pdlead/v1';
 
 	/**
+	 * Campaign tracking cookies read at submission. HandL UTM Grabber stores
+	 * them under the plain parameter names. The plugin never sets cookies; it
+	 * only reads what the browser sends.
+	 */
+	const TRACKING_COOKIES = array(
+		'utm_source',
+		'utm_medium',
+		'utm_campaign',
+		'utm_term',
+		'utm_content',
+		'gclid',
+		'handl_landing_page',
+		'handl_original_ref',
+	);
+
+	/**
+	 * Tracking values that hold a complete URL. They keep their own percent
+	 * encoding and are sanitized as URLs.
+	 */
+	const TRACKING_URL_KEYS = array( 'handl_landing_page', 'handl_original_ref' );
+
+	/**
+	 * Maximum length of a single tracking value.
+	 */
+	const TRACKING_MAX_LENGTH = 500;
+
+	/**
+	 * Maximum number of tracking entries, guards against a runaway filter.
+	 */
+	const TRACKING_MAX_ENTRIES = 20;
+
+	/**
 	 * Register hooks.
 	 */
 	public static function init() {
@@ -149,6 +181,12 @@ class Pdlead_Rest_Controller {
 
 		$flagged = ( Pdlead_Bot_Guard::ACTION_FLAG === $verdict['action'] );
 
+		// Read now: the lead may be dispatched later by cron, without cookies.
+		$tracking = self::collect_tracking( $form_id );
+		if ( $tracking ) {
+			$payload[ Pdlead_Form_CPT::TRACKING_KEY ] = $tracking;
+		}
+
 		// Local first: persist before contacting Pipedrive so no lead is lost.
 		$id = Pdlead_Submission_Store::insert(
 			array(
@@ -213,6 +251,11 @@ class Pdlead_Rest_Controller {
 					$options = array_map( 'trim', explode( ',', isset( $field['options'] ) ? $field['options'] : '' ) );
 					$payload[ $key ] = in_array( $value, $options, true ) ? $value : '';
 					break;
+				case 'hidden':
+					// Fixed value from the form definition. The request value is
+					// ignored, so a visitor cannot tamper with it.
+					$payload[ $key ] = sanitize_text_field( isset( $field['options'] ) ? $field['options'] : '' );
+					break;
 				case 'file':
 					// Files arrive via $_FILES, not the text params. The actual
 					// stored metadata is merged in later (see process_uploads).
@@ -225,6 +268,65 @@ class Pdlead_Rest_Controller {
 		}
 
 		return $payload;
+	}
+
+	/**
+	 * Collect the campaign tracking values from the request cookies.
+	 *
+	 * UTM values arrive query encoded when HandL wrote them in the browser
+	 * ("spring%20sale", "a+b") and plain when it wrote them on the server, so
+	 * one urldecode gives the same result for both. URL values are complete
+	 * URLs and are kept as they are.
+	 *
+	 * @param int $form_id Form post ID.
+	 * @return array<string,string> Sanitized values keyed by name, empty values dropped.
+	 */
+	private static function collect_tracking( $form_id ) {
+		$data = array();
+		foreach ( self::TRACKING_COOKIES as $name ) {
+			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Sanitized below, after the filter.
+			$value = isset( $_COOKIE[ $name ] ) ? wp_unslash( $_COOKIE[ $name ] ) : '';
+			if ( ! is_scalar( $value ) || '' === (string) $value ) {
+				continue;
+			}
+			$value         = (string) $value;
+			$data[ $name ] = in_array( $name, self::TRACKING_URL_KEYS, true ) ? $value : urldecode( $value );
+		}
+
+		// HandL fills a missing landing page with the URL of the current
+		// request, which here is this REST endpoint and no real landing page.
+		$uri = isset( $_SERVER['REQUEST_URI'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
+		if ( '' !== $uri && isset( $data['handl_landing_page'] ) && substr( $data['handl_landing_page'], -strlen( $uri ) ) === $uri ) {
+			unset( $data['handl_landing_page'] );
+		}
+
+		/**
+		 * Filter the campaign tracking values before they are stored with a
+		 * submission and sent to Pipedrive. Remove a key to keep that value out.
+		 *
+		 * @param array<string,string> $data    Values keyed by name.
+		 * @param int                  $form_id Form post ID.
+		 */
+		$data = (array) apply_filters( 'pdlead_tracking_data', $data, $form_id );
+
+		$clean = array();
+		foreach ( $data as $name => $value ) {
+			$name = sanitize_key( (string) $name );
+			if ( '' === $name || ! is_scalar( $value ) ) {
+				continue;
+			}
+			$value = in_array( $name, self::TRACKING_URL_KEYS, true ) ? esc_url_raw( (string) $value ) : sanitize_text_field( (string) $value );
+			$value = mb_substr( $value, 0, self::TRACKING_MAX_LENGTH );
+			if ( '' === $value ) {
+				continue;
+			}
+			$clean[ $name ] = $value;
+			if ( count( $clean ) >= self::TRACKING_MAX_ENTRIES ) {
+				break;
+			}
+		}
+
+		return $clean;
 	}
 
 	/**
@@ -351,6 +453,15 @@ class Pdlead_Rest_Controller {
 
 			if ( '' !== $value ) {
 				$lines[] = $label . ': ' . $value;
+			}
+		}
+
+		$tracking = isset( $payload[ Pdlead_Form_CPT::TRACKING_KEY ] ) ? $payload[ Pdlead_Form_CPT::TRACKING_KEY ] : array();
+		if ( is_array( $tracking ) && $tracking ) {
+			$lines[] = '';
+			$lines[] = __( 'Tracking:', 'pipedrive-lead-forms' );
+			foreach ( $tracking as $name => $value ) {
+				$lines[] = $name . ': ' . $value;
 			}
 		}
 

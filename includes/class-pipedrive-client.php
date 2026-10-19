@@ -1,6 +1,8 @@
 <?php
 /**
- * Thin Pipedrive API v1 client using the API token (x-api-token header).
+ * Thin Pipedrive API client using the API token (x-api-token header).
+ * Organizations and persons go through API v2 (their v1 endpoints are out of
+ * support); everything else (leads, notes, files, labels, users) stays on v1.
  * Classifies failures into retryable (429, 5xx, network) and permanent (4xx).
  *
  * @package PipedriveLeadForms
@@ -16,6 +18,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Pdlead_Pipedrive_Client {
 
 	/**
+	 * Transient caching the organization fields of the connected account.
+	 */
+	const ORG_FIELDS_CACHE = 'pdlead_org_fields';
+
+	/**
 	 * Optional API token override.
 	 *
 	 * @var string|null
@@ -23,23 +30,23 @@ class Pdlead_Pipedrive_Client {
 	private $token_override;
 
 	/**
-	 * Optional API base URL override.
+	 * Optional company domain override.
 	 *
 	 * @var string|null
 	 */
-	private $api_base_override;
+	private $domain_override;
 
 	/**
 	 * The overrides let the settings sanitizer validate against the token and
 	 * company domain being saved before they are persisted; every other caller
 	 * uses the stored settings via the null defaults.
 	 *
-	 * @param string|null $token    Optional API token override.
-	 * @param string|null $api_base Optional API base URL override.
+	 * @param string|null $token  Optional API token override.
+	 * @param string|null $domain Optional company domain override (raw setting value).
 	 */
-	public function __construct( $token = null, $api_base = null ) {
-		$this->token_override    = $token;
-		$this->api_base_override = $api_base;
+	public function __construct( $token = null, $domain = null ) {
+		$this->token_override  = $token;
+		$this->domain_override = $domain;
 	}
 
 	/**
@@ -52,12 +59,14 @@ class Pdlead_Pipedrive_Client {
 	}
 
 	/**
-	 * Resolve the API base URL, preferring the override.
+	 * Resolve the API base URL for an API version, preferring the override.
 	 *
+	 * @param string $version API version, 'v1' or 'v2'.
 	 * @return string
 	 */
-	private function base_url() {
-		return null !== $this->api_base_override ? (string) $this->api_base_override : Pdlead_Settings::api_base();
+	private function base_url( $version ) {
+		$domain = null !== $this->domain_override ? (string) $this->domain_override : (string) Pdlead_Settings::get( 'company_domain', '' );
+		return 'v2' === $version ? Pdlead_Settings::api_base_v2_for_domain( $domain ) : Pdlead_Settings::api_base_for_domain( $domain );
 	}
 
 	/**
@@ -67,18 +76,20 @@ class Pdlead_Pipedrive_Client {
 	 * @param string     $path   Path beginning with a slash, e.g. /persons.
 	 * @param array|null $body   Request body for write methods.
 	 * @param array      $query  Optional query args.
+	 * @param string     $version API version, 'v1' (default) or 'v2'.
 	 * @return array { ok: bool, status: int, data: array|null, retryable: bool, error: string }
 	 */
-	public function request( $method, $path, $body = null, $query = array() ) {
+	public function request( $method, $path, $body = null, $query = array(), $version = 'v1' ) {
 		$token = $this->token();
 		if ( '' === $token ) {
 			return $this->result( false, 0, null, false, __( 'No Pipedrive API token configured.', 'pipedrive-lead-forms' ) );
 		}
 
-		$url = $this->base_url() . $path;
+		$url = $this->base_url( $version ) . $path;
 		if ( ! empty( $query ) ) {
-			// add_query_arg URL-encodes values, so pass them raw.
-			$url = add_query_arg( $query, $url );
+			// add_query_arg does not encode values. Search terms such as
+			// "Smith & Sons" or "max+news@example.com" must be encoded here.
+			$url = add_query_arg( array_map( 'rawurlencode', $query ), $url );
 		}
 
 		$args = array(
@@ -159,8 +170,9 @@ class Pdlead_Pipedrive_Client {
 	 *
 	 * Leads share their custom fields with deals, so custom fields (e.g. an
 	 * acquisition type) are discovered here. Only option fields (enum = single
-	 * choice, set = multiple) that are user-editable custom fields are returned;
-	 * built-in enums such as the deal status are skipped.
+	 * choice, set = multiple) that are custom fields are returned; built-in
+	 * enums such as the deal status are skipped. The field code is the same
+	 * hash the v1 leads endpoint expects as key.
 	 *
 	 * @return array|null List of fields ( each: key, name, field_type, options[
 	 *                    id, label ] ), an empty array when the account has no
@@ -168,54 +180,21 @@ class Pdlead_Pipedrive_Client {
 	 *                    (missing token or API error).
 	 */
 	public function get_deal_option_fields() {
-		$res = $this->request(
-			'GET',
-			'/dealFields',
-			null,
-			array(
-				'start' => 0,
-				'limit' => 500,
-			)
-		);
-		if ( ! $res['ok'] ) {
+		$items = $this->get_fields( '/dealFields' );
+		if ( null === $items ) {
 			return null;
-		}
-		if ( empty( $res['data']['data'] ) || ! is_array( $res['data']['data'] ) ) {
-			return array();
 		}
 
 		$fields = array();
-		foreach ( $res['data']['data'] as $field ) {
-			if ( empty( $field['key'] ) || ! isset( $field['name'] ) ) {
+		foreach ( $items as $field ) {
+			if ( ! $field['custom'] || ( 'enum' !== $field['type'] && 'set' !== $field['type'] ) ) {
 				continue;
 			}
-			$type = isset( $field['field_type'] ) ? (string) $field['field_type'] : '';
-			if ( 'enum' !== $type && 'set' !== $type ) {
-				continue;
-			}
-			// Only user-editable custom fields; built-in enums report edit_flag false.
-			if ( isset( $field['edit_flag'] ) && false === $field['edit_flag'] ) {
-				continue;
-			}
-
-			$options = array();
-			if ( ! empty( $field['options'] ) && is_array( $field['options'] ) ) {
-				foreach ( $field['options'] as $option ) {
-					if ( ! isset( $option['id'] ) || ! isset( $option['label'] ) ) {
-						continue;
-					}
-					$options[] = array(
-						'id'    => (string) $option['id'],
-						'label' => (string) $option['label'],
-					);
-				}
-			}
-
 			$fields[] = array(
-				'key'        => (string) $field['key'],
-				'name'       => (string) $field['name'],
-				'field_type' => $type,
-				'options'    => $options,
+				'key'        => $field['code'],
+				'name'       => $field['name'],
+				'field_type' => $field['type'],
+				'options'    => $field['options'],
 			);
 		}
 		return $fields;
@@ -254,26 +233,186 @@ class Pdlead_Pipedrive_Client {
 	}
 
 	/**
+	 * Fetch the organization fields that a form field can be mapped to.
+	 *
+	 * Custom fields qualify by type. API v2 also returns system fields but has
+	 * no read-only flag, so writable system fields come from an allowlist.
+	 * Each field carries the write format the dispatcher converts a value to:
+	 * string, number, int, date, enum, set or address. The organization name is
+	 * left out, it has its own mapping target. Cached for an hour per account,
+	 * "Test connection" refreshes the cache.
+	 *
+	 * @return array|null List of fields ( each: code, name, format, custom,
+	 *                    options[ id, label ] ), an empty array when the account
+	 *                    has none, or null when they could not be loaded
+	 *                    (missing token or API error).
+	 */
+	public function get_organization_fields() {
+		$account = md5( $this->token() . '|' . $this->base_url( 'v2' ) );
+		$cached  = get_transient( self::ORG_FIELDS_CACHE );
+		if ( is_array( $cached ) && isset( $cached['account'], $cached['fields'] ) && $cached['account'] === $account ) {
+			return $cached['fields'];
+		}
+
+		$custom_formats = array(
+			'varchar'      => 'string',
+			'varchar_auto' => 'string',
+			'text'         => 'string',
+			'phone'        => 'string',
+			'double'       => 'number',
+			'date'         => 'date',
+			'enum'         => 'enum',
+			'set'          => 'set',
+			'address'      => 'address',
+		);
+		$system_formats = array(
+			'address'        => 'address',
+			'website'        => 'string',
+			'linkedin'       => 'string',
+			'industry'       => 'enum',
+			'annual_revenue' => 'int',
+			'employee_count' => 'int',
+		);
+
+		$items = $this->get_fields( '/organizationFields' );
+		if ( null === $items ) {
+			return null;
+		}
+
+		$fields = array();
+		foreach ( $items as $field ) {
+			if ( $field['custom'] ) {
+				$format = isset( $custom_formats[ $field['type'] ] ) ? $custom_formats[ $field['type'] ] : '';
+			} else {
+				$format = isset( $system_formats[ $field['code'] ] ) ? $system_formats[ $field['code'] ] : '';
+			}
+			if ( '' === $format ) {
+				continue;
+			}
+			$fields[] = array(
+				'code'    => $field['code'],
+				'name'    => $field['name'],
+				'format'  => $format,
+				'custom'  => $field['custom'],
+				'options' => $field['options'],
+			);
+		}
+
+		set_transient(
+			self::ORG_FIELDS_CACHE,
+			array(
+				'account' => $account,
+				'fields'  => $fields,
+			),
+			HOUR_IN_SECONDS
+		);
+		return $fields;
+	}
+
+	/**
+	 * Drop the cached organization fields so the next lookup reloads them.
+	 */
+	public static function flush_organization_fields() {
+		delete_transient( self::ORG_FIELDS_CACHE );
+	}
+
+	/**
+	 * Load all fields of an entity from a v2 fields endpoint, following the
+	 * cursor pagination.
+	 *
+	 * @param string $path Fields endpoint, e.g. /dealFields.
+	 * @return array|null List of fields ( each: code, name, type, custom,
+	 *                    options[ id, label ] ), or null when they could not be
+	 *                    loaded (missing token or API error).
+	 */
+	private function get_fields( $path ) {
+		$fields = array();
+		$cursor = '';
+		do {
+			$query = array( 'limit' => 500 );
+			if ( '' !== $cursor ) {
+				$query['cursor'] = $cursor;
+			}
+			$res = $this->request( 'GET', $path, null, $query, 'v2' );
+			if ( ! $res['ok'] ) {
+				return null;
+			}
+			$items = isset( $res['data']['data'] ) && is_array( $res['data']['data'] ) ? $res['data']['data'] : array();
+			foreach ( $items as $field ) {
+				if ( empty( $field['field_code'] ) || ! isset( $field['field_name'] ) ) {
+					continue;
+				}
+
+				$options = array();
+				if ( ! empty( $field['options'] ) && is_array( $field['options'] ) ) {
+					foreach ( $field['options'] as $option ) {
+						if ( isset( $option['id'], $option['label'] ) ) {
+							$options[] = array(
+								'id'    => (string) $option['id'],
+								'label' => (string) $option['label'],
+							);
+						}
+					}
+				}
+
+				$fields[] = array(
+					'code'    => (string) $field['field_code'],
+					'name'    => (string) $field['field_name'],
+					'type'    => isset( $field['field_type'] ) ? (string) $field['field_type'] : '',
+					'custom'  => ! empty( $field['is_custom_field'] ),
+					'options' => $options,
+				);
+			}
+			$cursor = isset( $res['data']['additional_data']['next_cursor'] ) ? (string) $res['data']['additional_data']['next_cursor'] : '';
+		} while ( '' !== $cursor );
+
+		return $fields;
+	}
+
+	/**
 	 * Search for an existing person by exact email.
 	 *
 	 * @param string $email Email address.
 	 * @return int|null Person ID when found.
 	 */
 	public function find_person_id_by_email( $email ) {
-		if ( '' === $email ) {
+		return $this->find_id( '/persons/search', $email, 'email' );
+	}
+
+	/**
+	 * Search for an existing organization by exact name (case insensitive).
+	 *
+	 * @param string $name Organization name.
+	 * @return int|null Organization ID when found.
+	 */
+	public function find_organization_id_by_name( $name ) {
+		return $this->find_id( '/organizations/search', $name, 'name' );
+	}
+
+	/**
+	 * Run an exact match v2 search and return the first hit's ID.
+	 *
+	 * @param string $path  Search endpoint, e.g. /persons/search.
+	 * @param string $term  Search term.
+	 * @param string $field Field to search in.
+	 * @return int|null ID when found; null on no match or a failed search.
+	 */
+	private function find_id( $path, $term, $field ) {
+		if ( '' === $term ) {
 			return null;
 		}
 
 		$res = $this->request(
 			'GET',
-			'/persons/search',
+			$path,
 			null,
 			array(
-				'term'        => $email,
-				'fields'      => 'email',
+				'term'        => $term,
+				'fields'      => $field,
 				'exact_match' => 'true',
 				'limit'       => '1',
-			)
+			),
+			'v2'
 		);
 
 		if ( ! $res['ok'] || empty( $res['data']['data']['items'] ) ) {
@@ -288,24 +427,23 @@ class Pdlead_Pipedrive_Client {
 	}
 
 	/**
-	 * Create an organization.
+	 * Create an organization (API v2).
 	 *
-	 * @param string $name  Organization name.
-	 * @param array  $extra Optional extra fields to merge into the payload (e.g. visible_to).
+	 * @param array $data Organization payload; name is required.
 	 * @return array Request result; ID available at data.data.id.
 	 */
-	public function create_organization( $name, $extra = array() ) {
-		return $this->request( 'POST', '/organizations', array_merge( array( 'name' => $name ), $extra ) );
+	public function create_organization( $data ) {
+		return $this->request( 'POST', '/organizations', $data, array(), 'v2' );
 	}
 
 	/**
-	 * Create a person.
+	 * Create a person (API v2).
 	 *
 	 * @param array $data Person payload.
 	 * @return array Request result; ID available at data.data.id.
 	 */
 	public function create_person( $data ) {
-		return $this->request( 'POST', '/persons', $data );
+		return $this->request( 'POST', '/persons', $data, array(), 'v2' );
 	}
 
 	/**
@@ -382,7 +520,7 @@ class Pdlead_Pipedrive_Client {
 			return $this->result( false, 0, null, false, __( 'No Pipedrive API token configured.', 'pipedrive-lead-forms' ) );
 		}
 
-		$url      = $this->base_url() . $path;
+		$url      = $this->base_url( 'v1' ) . $path;
 		$boundary = 'pdlead' . wp_generate_password( 24, false );
 		$eol      = "\r\n";
 		$fname    = str_replace( array( '"', "\r", "\n" ), '', (string) $file['filename'] );

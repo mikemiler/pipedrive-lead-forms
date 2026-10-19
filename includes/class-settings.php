@@ -113,17 +113,40 @@ class Pdlead_Settings {
 	 * @return string
 	 */
 	public static function api_base_for_domain( $domain ) {
+		$slug = self::domain_slug( $domain );
+		return '' !== $slug ? 'https://' . $slug . '.pipedrive.com/api/v1' : 'https://api.pipedrive.com/v1';
+	}
+
+	/**
+	 * Build the API v2 base URL for a given company domain value.
+	 *
+	 * Organizations and persons are only supported on v2. Unlike v1, the shared
+	 * host also needs the /api prefix.
+	 *
+	 * @param string $domain Raw company domain setting value.
+	 * @return string
+	 */
+	public static function api_base_v2_for_domain( $domain ) {
+		$slug = self::domain_slug( $domain );
+		return '' !== $slug ? 'https://' . $slug . '.pipedrive.com/api/v2' : 'https://api.pipedrive.com/api/v2';
+	}
+
+	/**
+	 * Reduce a company domain setting value to the bare subdomain.
+	 *
+	 * @param string $domain Raw value, e.g. "acme" or "https://acme.pipedrive.com".
+	 * @return string Subdomain, or '' when none is set.
+	 */
+	private static function domain_slug( $domain ) {
 		$domain = trim( (string) $domain );
-		if ( $domain ) {
-			// Accept either "acme" or "acme.pipedrive.com".
-			$domain = preg_replace( '#^https?://#', '', $domain );
-			$domain = preg_replace( '#\.pipedrive\.com.*$#', '', $domain );
-			$domain = preg_replace( '#[^a-z0-9-].*$#i', '', $domain );
-			if ( $domain ) {
-				return 'https://' . $domain . '.pipedrive.com/api/v1';
-			}
+		if ( '' === $domain ) {
+			return '';
 		}
-		return 'https://api.pipedrive.com/v1';
+		// Accept either "acme" or "acme.pipedrive.com".
+		$domain = preg_replace( '#^https?://#', '', $domain );
+		$domain = preg_replace( '#\.pipedrive\.com.*$#', '', $domain );
+		$domain = preg_replace( '#[^a-z0-9-].*$#i', '', $domain );
+		return (string) $domain;
 	}
 
 	/**

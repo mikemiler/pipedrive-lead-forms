@@ -109,12 +109,40 @@
 		}
 	}
 
+	/**
+	 * Prefill an empty Options column when a Pipedrive choice field is chosen
+	 * as mapping target, and switch the field to a Select, so the submitted
+	 * value matches a Pipedrive option label. Hidden fields are left alone:
+	 * their single fixed value is typed in manually.
+	 *
+	 * @param {HTMLElement} row Field row.
+	 */
+	function prefillOptions( row ) {
+		var map = row.querySelector( 'select[name="pdlead_field_map[]"]' );
+		var input = row.querySelector( 'input[name="pdlead_field_options[]"]' );
+		var type = row.querySelector( 'select[name="pdlead_field_type[]"]' );
+		var selected = map ? map.options[ map.selectedIndex ] : null;
+		var labels = selected ? selected.getAttribute( 'data-pdlead-options' ) : null;
+		if ( ! labels || ! input || input.value.trim() !== '' || ( type && type.value === 'hidden' ) ) {
+			return;
+		}
+		input.value = labels;
+		if ( type ) {
+			type.value = 'select';
+			toggleConsent( row );
+		}
+	}
+
 	function onChange( event ) {
+		var row = event.target.closest( '.pdlead-field-row' );
+		if ( ! row ) {
+			return;
+		}
 		if ( event.target.name === 'pdlead_field_type[]' ) {
-			var row = event.target.closest( '.pdlead-field-row' );
-			if ( row ) {
-				toggleConsent( row );
-			}
+			toggleConsent( row );
+		}
+		if ( event.target.name === 'pdlead_field_map[]' ) {
+			prefillOptions( row );
 		}
 	}
 

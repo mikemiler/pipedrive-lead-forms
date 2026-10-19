@@ -20,6 +20,7 @@ $wpdb->query( "DROP TABLE IF EXISTS {$pdlead_table}" ); // phpcs:ignore WordPres
 delete_option( 'pdlead_settings' );
 delete_option( 'pdlead_db_version' );
 delete_option( 'pdlead_hmac_secret' );
+delete_transient( 'pdlead_org_fields' );
 
 // Remove form definitions and their meta.
 $pdlead_forms = get_posts(

@@ -40,9 +40,16 @@ class Pdlead_Lead_Dispatcher {
 			'phone'       => '',
 			'org_name'    => '',
 			'lead_title'  => '',
+			'org_fields'  => array(),
 			'notes'       => array(),
 			'files'       => array(),
+			'tracking'    => array(),
 		);
+
+		// Campaign tracking values captured at submission.
+		if ( isset( $payload[ Pdlead_Form_CPT::TRACKING_KEY ] ) && is_array( $payload[ Pdlead_Form_CPT::TRACKING_KEY ] ) ) {
+			$mapped['tracking'] = $payload[ Pdlead_Form_CPT::TRACKING_KEY ];
+		}
 
 		foreach ( $fields as $field ) {
 			$key = isset( $field['key'] ) ? $field['key'] : '';
@@ -90,6 +97,18 @@ class Pdlead_Lead_Dispatcher {
 				case 'note':
 					$label = isset( $field['label'] ) ? $field['label'] : $key;
 					$mapped['notes'][] = $label . ': ' . $value;
+					break;
+				default:
+					// Organization field, keyed by its Pipedrive field code. The
+					// label is kept for the note fallback (see build_org_payload).
+					if ( Pdlead_Form_CPT::is_org_field_target( $map ) ) {
+						$code = substr( $map, strlen( Pdlead_Form_CPT::ORG_FIELD_PREFIX ) );
+
+						$mapped['org_fields'][ $code ] = array(
+							'label' => isset( $field['label'] ) ? $field['label'] : $key,
+							'value' => $value,
+						);
+					}
 					break;
 			}
 		}
@@ -148,13 +167,38 @@ class Pdlead_Lead_Dispatcher {
 		$visible_to = (int) $settings['visible_to'];
 
 		// Step 1: organization (optional, only when a name was provided).
+		// Reuse an existing organization by name to avoid duplicates. Its data
+		// is never overwritten, so mapped organization field values that are not
+		// sent end up in the lead note instead.
 		if ( ! $org_id && '' !== $mapped['org_name'] ) {
-			$org_extra = $visible_to > 0 ? array( 'visible_to' => (string) $visible_to ) : array();
-			$res       = $client->create_organization( $mapped['org_name'], $org_extra );
-			if ( ! $res['ok'] ) {
-				return self::handle_failure( $id, $row, $res );
+			$leftover = $mapped['org_fields'];
+			$found    = $client->find_organization_id_by_name( $mapped['org_name'] );
+			if ( $found ) {
+				$org_id = $found;
+			} else {
+				$base = array( 'name' => $mapped['org_name'] );
+				if ( $visible_to > 0 ) {
+					// API v2 expects visible_to as an integer.
+					$base['visible_to'] = $visible_to;
+				}
+				list( $org_payload, $leftover ) = self::build_org_payload( $base, $mapped['org_fields'], $client );
+
+				$res = $client->create_organization( $org_payload );
+				if ( ! $res['ok'] && ! $res['retryable'] && $org_payload !== $base ) {
+					// v2 validation errors do not name the failing field. Rather
+					// than losing the lead, create the organization with its name
+					// only and keep every mapped value in the note.
+					$res      = $client->create_organization( $base );
+					$leftover = $mapped['org_fields'];
+				}
+				if ( ! $res['ok'] ) {
+					return self::handle_failure( $id, $row, $res );
+				}
+				$org_id = isset( $res['data']['data']['id'] ) ? (int) $res['data']['data']['id'] : 0;
 			}
-			$org_id = isset( $res['data']['data']['id'] ) ? (int) $res['data']['data']['id'] : 0;
+			foreach ( $leftover as $item ) {
+				$mapped['notes'][] = $item['label'] . ': ' . $item['value'];
+			}
 			Pdlead_Submission_Store::update( $id, array( 'pipedrive_org_id' => $org_id ) );
 		}
 
@@ -168,20 +212,32 @@ class Pdlead_Lead_Dispatcher {
 			}
 
 			if ( ! $person_id ) {
+				// API v2 expects emails and phones as lists of objects and
+				// visible_to as an integer.
 				$person_payload = array( 'name' => $mapped['person_name'] );
 				if ( '' !== $mapped['email'] ) {
-					// Pipedrive v1 accepts a plain string for email and phone.
-					$person_payload['email'] = $mapped['email'];
+					$person_payload['emails'] = array(
+						array(
+							'value'   => $mapped['email'],
+							'primary' => true,
+							'label'   => 'work',
+						),
+					);
 				}
 				if ( '' !== $mapped['phone'] ) {
-					$person_payload['phone'] = $mapped['phone'];
+					$person_payload['phones'] = array(
+						array(
+							'value'   => $mapped['phone'],
+							'primary' => true,
+							'label'   => 'work',
+						),
+					);
 				}
 				if ( $org_id ) {
 					$person_payload['org_id'] = $org_id;
 				}
 				if ( $visible_to > 0 ) {
-					// Pipedrive API v1 expects visible_to as a string ("1", "3", "5", "7").
-					$person_payload['visible_to'] = (string) $visible_to;
+					$person_payload['visible_to'] = $visible_to;
 				}
 
 				$res = $client->create_person( $person_payload );
@@ -207,6 +263,7 @@ class Pdlead_Lead_Dispatcher {
 				$lead_payload['owner_id'] = (int) $settings['owner_id'];
 			}
 			if ( $visible_to > 0 ) {
+				// The leads endpoint is still v1, which expects visible_to as a string.
 				$lead_payload['visible_to'] = (string) $visible_to;
 			}
 			$label_ids = self::parse_id_list( $settings['label_ids'] );
@@ -231,8 +288,19 @@ class Pdlead_Lead_Dispatcher {
 
 		// Step 4: note (secondary). A note failure must not block the lead nor
 		// trigger a retry, otherwise the lead would be recreated. Best effort.
-		if ( ! empty( $mapped['notes'] ) && '' !== $lead_id ) {
-			$client->create_note( implode( "\n", $mapped['notes'] ), $lead_id );
+		// The tracking block goes last, after any organization leftover lines.
+		$notes = $mapped['notes'];
+		if ( ! empty( $mapped['tracking'] ) ) {
+			if ( $notes ) {
+				$notes[] = '';
+			}
+			$notes[] = __( 'Tracking:', 'pipedrive-lead-forms' );
+			foreach ( $mapped['tracking'] as $name => $value ) {
+				$notes[] = $name . ': ' . $value;
+			}
+		}
+		if ( ! empty( $notes ) && '' !== $lead_id ) {
+			$client->create_note( implode( "\n", $notes ), $lead_id );
 		}
 
 		// Step 4b: file attachments (secondary, best effort like the note). A
@@ -254,6 +322,84 @@ class Pdlead_Lead_Dispatcher {
 		);
 
 		return Pdlead_Submission_Store::STATUS_SENT;
+	}
+
+	/**
+	 * Add the mapped organization field values to an organization payload.
+	 *
+	 * Each value is converted to the write format of its Pipedrive field. A
+	 * value that does not fit (unknown or deleted field, no matching option,
+	 * not a number or date) is returned as leftover for the lead note, since a
+	 * rejected organization would otherwise block the whole lead.
+	 *
+	 * @param array                   $payload    Base payload (name, visible_to).
+	 * @param array                   $org_fields Mapped values keyed by field code ( label, value ).
+	 * @param Pdlead_Pipedrive_Client $client     API client.
+	 * @return array { 0: array payload, 1: array leftover values keyed by field code }
+	 */
+	private static function build_org_payload( $payload, $org_fields, $client ) {
+		if ( empty( $org_fields ) ) {
+			return array( $payload, array() );
+		}
+		$fields = $client->get_organization_fields();
+		if ( null === $fields ) {
+			return array( $payload, $org_fields );
+		}
+		$known = array_column( $fields, null, 'code' );
+
+		$leftover = array();
+		foreach ( $org_fields as $code => $item ) {
+			$value = isset( $known[ $code ] ) ? self::org_field_value( $known[ $code ], $item['value'] ) : null;
+			if ( null === $value ) {
+				$leftover[ $code ] = $item;
+			} elseif ( $known[ $code ]['custom'] ) {
+				$payload['custom_fields'][ $code ] = $value;
+			} else {
+				$payload[ $code ] = $value;
+			}
+		}
+		return array( $payload, $leftover );
+	}
+
+	/**
+	 * Convert a submitted value to the API v2 write format of a field.
+	 *
+	 * @param array  $field Organization field ( format, options ).
+	 * @param string $raw   Submitted value, trimmed and not empty.
+	 * @return mixed Converted value, or null when the value does not fit.
+	 */
+	private static function org_field_value( $field, $raw ) {
+		switch ( $field['format'] ) {
+			case 'string':
+				return $raw;
+			case 'address':
+				return array( 'value' => $raw );
+			case 'number':
+				$number = str_replace( ' ', '', $raw );
+				if ( false === strpos( $number, '.' ) ) {
+					// Accept a decimal comma, e.g. "12,5".
+					$number = str_replace( ',', '.', $number );
+				}
+				return is_numeric( $number ) ? (float) $number : null;
+			case 'int':
+				$number = str_replace( ' ', '', $raw );
+				return ctype_digit( $number ) ? (int) $number : null;
+			case 'date':
+				if ( preg_match( '/^(\d{4})-(\d{2})-(\d{2})$/', $raw, $m ) && checkdate( (int) $m[2], (int) $m[3], (int) $m[1] ) ) {
+					return $raw;
+				}
+				return null;
+			case 'enum':
+			case 'set':
+				foreach ( $field['options'] as $option ) {
+					if ( 0 === strcasecmp( trim( $option['label'] ), $raw ) && is_numeric( $option['id'] ) ) {
+						// The form select is single choice, so a set gets one option.
+						return 'set' === $field['format'] ? array( (int) $option['id'] ) : (int) $option['id'];
+					}
+				}
+				return null;
+		}
+		return null;
 	}
 
 	/**

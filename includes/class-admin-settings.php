@@ -105,7 +105,7 @@ class Pdlead_Admin_Settings {
 
 		// Client for validating account-scoped IDs, honoring a token or company
 		// domain changed in this same save.
-		$client = new Pdlead_Pipedrive_Client( $effective_token, Pdlead_Settings::api_base_for_domain( $out['company_domain'] ) );
+		$client = new Pdlead_Pipedrive_Client( $effective_token, $out['company_domain'] );
 
 		$out['turnstile_enabled']      = empty( $input['turnstile_enabled'] ) ? 0 : 1;
 		$out['turnstile_site_key']     = isset( $input['turnstile_site_key'] ) ? sanitize_text_field( $input['turnstile_site_key'] ) : '';
@@ -412,7 +412,7 @@ class Pdlead_Admin_Settings {
 				<input type="hidden" name="action" value="pdlead_test_connection" />
 				<?php wp_nonce_field( 'pdlead_test_connection' ); ?>
 				<?php submit_button( __( 'Test Pipedrive connection', 'pipedrive-lead-forms' ), 'secondary', 'submit', false ); ?>
-				<p class="description"><?php esc_html_e( 'Calls /users/me with the saved token. Save your settings first.', 'pipedrive-lead-forms' ); ?></p>
+				<p class="description"><?php esc_html_e( 'Calls /users/me with the saved token and reloads the Pipedrive organization fields offered in the form editor. Save your settings first.', 'pipedrive-lead-forms' ); ?></p>
 			</form>
 		</div>
 		<?php
@@ -568,6 +568,9 @@ class Pdlead_Admin_Settings {
 			wp_die( esc_html__( 'You are not allowed to do this.', 'pipedrive-lead-forms' ) );
 		}
 		check_admin_referer( 'pdlead_test_connection' );
+
+		// Also refreshes the organization fields offered in the form editor.
+		Pdlead_Pipedrive_Client::flush_organization_fields();
 
 		$client = new Pdlead_Pipedrive_Client();
 		$res    = $client->test_connection();
