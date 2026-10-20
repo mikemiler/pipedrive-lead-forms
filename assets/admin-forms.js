@@ -169,6 +169,11 @@
 		}
 		if ( event.target.name === 'pdlead_field_type[]' ) {
 			syncType( row );
+			// A new file field should reach Pipedrive without an extra step.
+			var map = row.querySelector( 'select[name="pdlead_field_map[]"]' );
+			if ( event.target.value === 'file' && map && map.value === 'none' ) {
+				map.value = 'file';
+			}
 		}
 		if ( event.target.name === 'pdlead_field_map[]' ) {
 			prefillOptions( row );

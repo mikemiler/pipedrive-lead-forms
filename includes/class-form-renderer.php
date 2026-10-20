@@ -29,11 +29,89 @@ class Pdlead_Form_Renderer {
 	private static $registered = false;
 
 	/**
+	 * Forms rendered this request, so element IDs stay unique when one page
+	 * shows several forms or the same form twice.
+	 *
+	 * @var int
+	 */
+	private static $instance = 0;
+
+	/**
+	 * Browser autocomplete tokens per mapping target (WCAG 1.3.5).
+	 */
+	const AUTOCOMPLETE = array(
+		'person_name' => 'name',
+		'email'       => 'email',
+		'phone'       => 'tel',
+		'org_name'    => 'organization',
+	);
+
+	/**
 	 * Register hooks.
 	 */
 	public static function init() {
 		add_shortcode( 'pdlead_form', array( __CLASS__, 'shortcode' ) );
 		add_action( 'wp_enqueue_scripts', array( __CLASS__, 'register_assets' ) );
+
+		// WP Rocket: keep the form working with its optimizations on, and drop
+		// cached pages when a form or the settings change, since the form
+		// markup is part of the cached page.
+		add_filter( 'rocket_delay_js_exclusions', array( __CLASS__, 'rocket_delay_js_exclusions' ) );
+		add_filter( 'rocket_rucss_safelist', array( __CLASS__, 'rocket_rucss_safelist' ) );
+		// After the form fields are saved (save_post, default priority).
+		add_action( 'save_post', array( __CLASS__, 'purge_on_form_save' ), 20, 2 );
+		add_action( 'trashed_post', array( __CLASS__, 'purge_on_form_save' ) );
+		add_action( 'update_option_' . Pdlead_Settings::OPTION, array( __CLASS__, 'purge_page_cache' ) );
+	}
+
+	/**
+	 * Never delay the form script, its config and Turnstile: delayed until the
+	 * first interaction, a click on Send could submit the form natively.
+	 *
+	 * @param array $exclusions Patterns WP Rocket must not delay.
+	 * @return array
+	 */
+	public static function rocket_delay_js_exclusions( $exclusions ) {
+		return array_merge( (array) $exclusions, array( 'pipedrive-lead-forms/assets/form.js', 'pdleadConfig', 'challenges.cloudflare.com/turnstile' ) );
+	}
+
+	/**
+	 * Keep the form styles that only the script applies (status colors,
+	 * invalid fields), which Remove Unused CSS cannot see in the page.
+	 *
+	 * @param array $safelist Selectors WP Rocket must keep.
+	 * @return array
+	 */
+	public static function rocket_rucss_safelist( $safelist ) {
+		return array_merge( (array) $safelist, array( '.pdlead-(.*)' ) );
+	}
+
+	/**
+	 * Purge after a real save of a form, not for the auto-draft "Add New"
+	 * creates, autosaves or revisions.
+	 *
+	 * @param int          $post_id Post ID.
+	 * @param WP_Post|null $post    Post object.
+	 */
+	public static function purge_on_form_save( $post_id, $post = null ) {
+		$post = $post ? $post : get_post( $post_id );
+		if ( ! $post || PDLEAD_CPT !== $post->post_type || 'auto-draft' === $post->post_status ) {
+			return;
+		}
+		if ( ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) || wp_is_post_revision( $post_id ) ) {
+			return;
+		}
+		self::purge_page_cache();
+	}
+
+	/**
+	 * Clear the WP Rocket page cache. Form posts are not public, so WP Rocket
+	 * does not purge the pages that embed them on its own.
+	 */
+	public static function purge_page_cache() {
+		if ( function_exists( 'rocket_clean_domain' ) ) {
+			rocket_clean_domain();
+		}
 	}
 
 	/**
@@ -49,7 +127,7 @@ class Pdlead_Form_Renderer {
 		wp_register_script( 'pdlead-form', PDLEAD_URL . 'assets/form.js', array(), PDLEAD_VERSION, true );
 
 		// Only non-secret, visitor-agnostic data is localized so it stays cacheable.
-		$turnstile_enabled = (int) Pdlead_Settings::get( 'turnstile_enabled' );
+		$turnstile_enabled = Pdlead_Settings::turnstile_active();
 		wp_localize_script(
 			'pdlead-form',
 			'pdleadConfig',
@@ -60,6 +138,7 @@ class Pdlead_Form_Renderer {
 				'i18n'             => array(
 					'sending'    => __( 'Sending...', 'pipedrive-lead-forms' ),
 					'genericErr' => __( 'Something went wrong. Please try again.', 'pipedrive-lead-forms' ),
+					'fileErr'    => __( 'A file is too large or there are too many files. Please attach smaller or fewer files.', 'pipedrive-lead-forms' ),
 				),
 			)
 		);
@@ -92,7 +171,7 @@ class Pdlead_Form_Renderer {
 		wp_enqueue_style( 'pdlead-form' );
 		wp_enqueue_script( 'pdlead-form' );
 
-		if ( Pdlead_Settings::get( 'turnstile_enabled' ) && Pdlead_Settings::get( 'turnstile_site_key' ) ) {
+		if ( Pdlead_Settings::turnstile_active() ) {
 			// phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion -- third-party CDN script; versioning is managed by Cloudflare, not us.
 			wp_enqueue_script( 'pdlead-turnstile', 'https://challenges.cloudflare.com/turnstile/v0/api.js', array(), null, true );
 		}
@@ -108,7 +187,7 @@ class Pdlead_Form_Renderer {
 	 * @return string
 	 */
 	private static function render( $form_id, $fields ) {
-		$turnstile_enabled = Pdlead_Settings::get( 'turnstile_enabled' ) && Pdlead_Settings::get( 'turnstile_site_key' );
+		$turnstile_enabled = Pdlead_Settings::turnstile_active();
 
 		// Form specific texts handled on the client: the error text is the fallback
 		// when the request never reaches the server (a network failure), and the
@@ -116,11 +195,22 @@ class Pdlead_Form_Renderer {
 		$error_message   = Pdlead_Form_CPT::get_error_message( $form_id );
 		$sending_message = Pdlead_Form_CPT::get_sending_message( $form_id );
 
+		++self::$instance;
+		$id_prefix = 'pdlead-' . $form_id . '-' . self::$instance . '-';
+
+		// Upload limits for the client side check: per file, files per request
+		// and the whole request body (PHP drops every field above post_max_size).
+		$max_bytes = Pdlead_Settings::max_file_size_bytes();
+		$max_files = (int) ini_get( 'max_file_uploads' );
+		$max_total = wp_convert_hr_to_bytes( (string) ini_get( 'post_max_size' ) );
+
+		// method="post" keeps the values out of the URL should the script never
+		// run; the script always handles the submit itself.
 		ob_start();
 		?>
-		<form class="pdlead-form" data-pdlead-form="<?php echo esc_attr( $form_id ); ?>" data-pdlead-error="<?php echo esc_attr( $error_message ); ?>" data-pdlead-sending="<?php echo esc_attr( $sending_message ); ?>" novalidate>
+		<form class="pdlead-form" method="post" data-pdlead-form="<?php echo esc_attr( $form_id ); ?>" data-pdlead-error="<?php echo esc_attr( $error_message ); ?>" data-pdlead-sending="<?php echo esc_attr( $sending_message ); ?>" data-pdlead-max-bytes="<?php echo esc_attr( $max_bytes ); ?>" data-pdlead-max-files="<?php echo esc_attr( $max_files ); ?>" data-pdlead-max-total="<?php echo esc_attr( $max_total ); ?>" novalidate>
 			<?php foreach ( $fields as $field ) : ?>
-				<?php echo self::render_field( $field ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+				<?php echo self::render_field( $field, $id_prefix ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 			<?php endforeach; ?>
 
 			<?php // Honeypot: hidden from humans, assistive tech and keyboard nav. ?>
@@ -139,9 +229,10 @@ class Pdlead_Form_Renderer {
 			<input type="hidden" name="pdlead_ts" value="" />
 			<input type="hidden" name="pdlead_sig" value="" />
 
-			<button type="submit" class="pdlead-submit"><?php esc_html_e( 'Send', 'pipedrive-lead-forms' ); ?></button>
+			<?php // wp-element-button picks up the button style of block themes. ?>
+			<button type="submit" class="pdlead-submit wp-element-button"><?php esc_html_e( 'Send', 'pipedrive-lead-forms' ); ?></button>
 
-			<div class="pdlead-status" role="alert" aria-live="polite"></div>
+			<div class="pdlead-status" role="status" aria-live="polite" tabindex="-1"></div>
 		</form>
 		<?php
 		return trim( ob_get_clean() );
@@ -150,16 +241,19 @@ class Pdlead_Form_Renderer {
 	/**
 	 * Render a single form field.
 	 *
-	 * @param array $field Field definition.
+	 * @param array  $field     Field definition.
+	 * @param string $id_prefix Element ID prefix unique to this form instance.
 	 * @return string
 	 */
-	private static function render_field( $field ) {
+	private static function render_field( $field, $id_prefix ) {
 		$key      = isset( $field['key'] ) ? $field['key'] : '';
 		$label    = isset( $field['label'] ) ? $field['label'] : '';
 		$type     = isset( $field['type'] ) ? $field['type'] : 'text';
 		$required = ( isset( $field['required'] ) && 'yes' === $field['required'] );
 		$name     = 'fields[' . $key . ']';
-		$id       = 'pdlead-' . $key;
+		$id       = $id_prefix . $key;
+		$map      = isset( $field['map_to'] ) ? $field['map_to'] : 'none';
+		$auto     = isset( self::AUTOCOMPLETE[ $map ] ) ? ' autocomplete="' . self::AUTOCOMPLETE[ $map ] . '"' : '';
 		$req_attr = $required ? ' required' : '';
 		$req_mark = $required ? ' <span class="pdlead-req" aria-hidden="true">*</span>' : '';
 
@@ -176,7 +270,7 @@ class Pdlead_Form_Renderer {
 				?>
 				<p class="pdlead-row">
 					<label for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $label ) . $req_mark; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></label>
-					<textarea id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" rows="5" placeholder="<?php echo esc_attr( $label ); ?>"<?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>></textarea>
+					<textarea id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" rows="5" maxlength="<?php echo esc_attr( Pdlead_Rest_Controller::TEXTAREA_MAX_LENGTH ); ?>" placeholder="<?php echo esc_attr( $label ); ?>"<?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>></textarea>
 				</p>
 				<?php
 				break;
@@ -224,7 +318,7 @@ class Pdlead_Form_Renderer {
 				?>
 				<p class="pdlead-row">
 					<label for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $label ) . $req_mark; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></label>
-					<input type="<?php echo esc_attr( $input_type ); ?>" id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" placeholder="<?php echo esc_attr( $label ); ?>"<?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?> />
+					<input type="<?php echo esc_attr( $input_type ); ?>" id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" maxlength="<?php echo esc_attr( Pdlead_Rest_Controller::TEXT_MAX_LENGTH ); ?>" placeholder="<?php echo esc_attr( $label ); ?>"<?php echo $auto . $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- fixed attribute strings. ?> />
 				</p>
 				<?php
 				break;

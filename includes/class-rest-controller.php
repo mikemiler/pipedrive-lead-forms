@@ -18,30 +18,28 @@ class Pdlead_Rest_Controller {
 	const NAMESPACE = 'pdlead/v1';
 
 	/**
-	 * Campaign tracking cookies read at submission. HandL UTM Grabber stores
-	 * them under the plain parameter names. The plugin never sets cookies; it
-	 * only reads what the browser sends.
+	 * Maximum length of a single cookie value.
 	 */
-	const TRACKING_COOKIES = array(
-		'utm_source',
-		'utm_medium',
-		'utm_campaign',
-		'utm_term',
-		'utm_content',
-		'gclid',
-		'handl_landing_page',
-		'handl_original_ref',
-	);
+	const COOKIE_MAX_LENGTH = 500;
 
 	/**
-	 * Maximum length of a single tracking value.
+	 * Maximum length of a single line value and of a textarea value. Long
+	 * values would make Pipedrive reject the person, lead or note.
 	 */
-	const TRACKING_MAX_LENGTH = 500;
+	const TEXT_MAX_LENGTH     = 255;
+	const TEXTAREA_MAX_LENGTH = 20000;
 
 	/**
-	 * Maximum number of tracking entries, guards against a runaway filter.
+	 * Submission IDs to send to Pipedrive once the visitor has the response.
+	 *
+	 * @var int[]
 	 */
-	const TRACKING_MAX_ENTRIES = 20;
+	private static $deferred = array();
+
+	/**
+	 * Maximum number of cookie entries, guards against a runaway filter.
+	 */
+	const COOKIE_MAX_ENTRIES = 20;
 
 	/**
 	 * Register hooks.
@@ -110,6 +108,14 @@ class Pdlead_Rest_Controller {
 		// Read from the POST body only, never the URL query.
 		$params = $request->get_body_params();
 
+		// A body over post_max_size makes PHP drop every field, which would
+		// otherwise surface as an expired session.
+		$length = isset( $_SERVER['CONTENT_LENGTH'] ) ? (int) $_SERVER['CONTENT_LENGTH'] : 0;
+		$limit  = wp_convert_hr_to_bytes( (string) ini_get( 'post_max_size' ) );
+		if ( $limit > 0 && $length > $limit ) {
+			return self::error( 'too_large', __( 'The files are too large to send. Please attach smaller or fewer files.', 'pipedrive-lead-forms' ), 413 );
+		}
+
 		// Nonce check. For logged in users this is real CSRF protection. For
 		// anonymous visitors a WP nonce is a rotating shared token, so the bot
 		// defense relies on the bot guard below, not on this check.
@@ -135,25 +141,34 @@ class Pdlead_Rest_Controller {
 
 		// Silent drop for high confidence bot signals.
 		if ( Pdlead_Bot_Guard::ACTION_DROP === $verdict['action'] ) {
-			Pdlead_Submission_Store::insert(
-				array(
-					'form_id' => $form_id,
-					'ip_hash' => Pdlead_Bot_Guard::ip_hash( $ip ),
-					'payload' => self::collect_payload( $fields, $params ),
-					'status'  => Pdlead_Submission_Store::STATUS_SPAM,
-					'flagged' => true,
-				)
-			);
+			// Logged for review, unless the same IP floods far over the limit.
+			if ( ! Pdlead_Bot_Guard::is_flooding( $ip ) ) {
+				Pdlead_Submission_Store::insert(
+					array(
+						'form_id' => $form_id,
+						'ip_hash' => Pdlead_Bot_Guard::ip_hash( $ip ),
+						'payload' => self::collect_payload( $fields, $params ),
+						'status'  => Pdlead_Submission_Store::STATUS_SPAM,
+						'flagged' => true,
+					)
+				);
+			}
 			// Pretend success so a bot learns nothing.
 			return self::success( $form_id );
 		}
 
-		// Friendly errors (rate limit, captcha, expired token).
-		if ( Pdlead_Bot_Guard::ACTION_ERROR === $verdict['action'] ) {
-			$status = ( 'rate_limited' === $verdict['reason'] ) ? 429 : 403;
-			if ( 'expired' === $verdict['reason'] ) {
-				$status = 400;
-			}
+		// Over the rate limit: behind a proxy or office NAT real visitors share
+		// one IP, so the submission is kept but held back from Pipedrive until
+		// the owner releases it in the log.
+		$held = ( Pdlead_Bot_Guard::ACTION_ERROR === $verdict['action'] && 'rate_limited' === $verdict['reason'] );
+
+		// Friendly errors (captcha, expired token, far over the rate limit).
+		if ( ! $held && Pdlead_Bot_Guard::ACTION_ERROR === $verdict['action'] ) {
+			$codes  = array(
+				'expired'      => 400,
+				'rate_blocked' => 429,
+			);
+			$status = isset( $codes[ $verdict['reason'] ] ) ? $codes[ $verdict['reason'] ] : 403;
 			return self::error( $verdict['reason'], $verdict['message'], $status );
 		}
 
@@ -167,18 +182,22 @@ class Pdlead_Rest_Controller {
 		}
 
 		$invalid = self::validate( $fields, $payload );
-		if ( $uploads['error'] || ! empty( $invalid ) ) {
+		if ( $uploads['invalid'] || $invalid ) {
 			// Remove just-stored files so a rejected submission leaves nothing behind.
 			self::delete_payload_files( $payload );
-			return self::error( 'validation', __( 'Please complete all required fields correctly.', 'pipedrive-lead-forms' ), 422, $form_id );
+			$keys = array( 'fields' => array_values( array_unique( array_merge( $invalid, $uploads['invalid'] ) ) ) );
+			if ( ! $invalid ) {
+				return self::error( 'file', __( 'A file could not be accepted. Please check its type and size and try again.', 'pipedrive-lead-forms' ), 422, $form_id, $keys );
+			}
+			return self::error( 'validation', __( 'Please complete all required fields correctly.', 'pipedrive-lead-forms' ), 422, $form_id, $keys );
 		}
 
-		$flagged = ( Pdlead_Bot_Guard::ACTION_FLAG === $verdict['action'] );
+		$flagged = $held || ( Pdlead_Bot_Guard::ACTION_FLAG === $verdict['action'] );
 
 		// Read now: the lead may be dispatched later by cron, without cookies.
-		$tracking = self::collect_tracking( $form_id );
-		if ( $tracking ) {
-			$payload[ Pdlead_Form_CPT::TRACKING_KEY ] = $tracking;
+		$cookies = self::collect_cookies( $form_id );
+		if ( $cookies ) {
+			$payload[ Pdlead_Form_CPT::COOKIES_KEY ] = $cookies;
 		}
 
 		// Local first: persist before contacting Pipedrive so no lead is lost.
@@ -187,10 +206,17 @@ class Pdlead_Rest_Controller {
 				'form_id' => $form_id,
 				'ip_hash' => Pdlead_Bot_Guard::ip_hash( $ip ),
 				'payload' => $payload,
-				'status'  => Pdlead_Submission_Store::STATUS_PENDING,
+				'status'  => $held ? Pdlead_Submission_Store::STATUS_HELD : Pdlead_Submission_Store::STATUS_PENDING,
 				'flagged' => $flagged,
 			)
 		);
+
+		if ( $id && $held ) {
+			Pdlead_Submission_Store::update(
+				$id,
+				array( 'last_error' => __( 'Held back: too many submissions from this IP address in a short time. Not sent to Pipedrive. Check it and use "Send to Pipedrive" to release it.', 'pipedrive-lead-forms' ) )
+			);
+		}
 
 		if ( ! $id ) {
 			// The database write failed. Email the raw lead anyway so it is not
@@ -201,12 +227,51 @@ class Pdlead_Rest_Controller {
 
 		// Backup email: a copy that does not depend on Pipedrive availability or
 		// WP-Cron timing. Enabled by default so a lead is never lost.
-		self::backup_email( $post, $fields, $payload, false );
+		// Held rows may come from a flood, so their copy carries no attachments.
+		self::backup_email( $post, $fields, $payload, false, ! $held );
 
-		// Try to push immediately. On failure the row stays pending for retry.
-		Pdlead_Lead_Dispatcher::dispatch( $id );
+		// Send to Pipedrive right after the response, so a slow API never
+		// delays the visitor. On failure the row stays pending for retry.
+		if ( ! $held ) {
+			self::defer_dispatch( $id );
+		}
 
 		return self::success( $form_id );
+	}
+
+	/**
+	 * Queue a submission for dispatch at the end of this request.
+	 *
+	 * @param int $id Submission ID.
+	 */
+	private static function defer_dispatch( $id ) {
+		if ( ! self::$deferred ) {
+			add_action( 'shutdown', array( __CLASS__, 'dispatch_deferred' ) );
+		}
+		self::$deferred[] = (int) $id;
+	}
+
+	/**
+	 * Shutdown handler: close the connection to the visitor where the server
+	 * allows it, then send the queued submissions. Without PHP-FPM or
+	 * LiteSpeed the visitor waits as before; the retry cron covers any row a
+	 * killed request leaves pending.
+	 */
+	public static function dispatch_deferred() {
+		$ids            = self::$deferred;
+		self::$deferred = array();
+		if ( ! $ids ) {
+			return;
+		}
+		ignore_user_abort( true );
+		if ( function_exists( 'fastcgi_finish_request' ) ) {
+			fastcgi_finish_request();
+		} elseif ( function_exists( 'litespeed_finish_request' ) ) {
+			litespeed_finish_request();
+		}
+		foreach ( $ids as $id ) {
+			Pdlead_Lead_Dispatcher::dispatch( $id );
+		}
 	}
 
 	/**
@@ -231,10 +296,15 @@ class Pdlead_Rest_Controller {
 
 			switch ( $type ) {
 				case 'email':
-					$payload[ $key ] = sanitize_email( is_scalar( $raw ) ? $raw : '' );
+					$text  = trim( sanitize_text_field( is_scalar( $raw ) ? $raw : '' ) );
+					$email = sanitize_email( $text );
+					// sanitize_email silently drops characters such as umlauts.
+					// Keep the text then, so validate() rejects it instead of
+					// storing a different, wrong address.
+					$payload[ $key ] = mb_substr( $email === $text ? $email : $text, 0, self::TEXT_MAX_LENGTH );
 					break;
 				case 'textarea':
-					$payload[ $key ] = sanitize_textarea_field( is_scalar( $raw ) ? $raw : '' );
+					$payload[ $key ] = mb_substr( sanitize_textarea_field( is_scalar( $raw ) ? $raw : '' ), 0, self::TEXTAREA_MAX_LENGTH );
 					break;
 				case 'checkbox':
 				case 'consent':
@@ -248,7 +318,7 @@ class Pdlead_Rest_Controller {
 				case 'hidden':
 					// Fixed value from the form definition. The request value is
 					// ignored, so a visitor cannot tamper with it.
-					$payload[ $key ] = sanitize_text_field( isset( $field['options'] ) ? $field['options'] : '' );
+					$payload[ $key ] = mb_substr( sanitize_text_field( isset( $field['options'] ) ? $field['options'] : '' ), 0, self::TEXT_MAX_LENGTH );
 					break;
 				case 'cookie':
 					// Read from the cookie named in the form definition, never
@@ -262,7 +332,7 @@ class Pdlead_Rest_Controller {
 					$payload[ $key ] = array();
 					break;
 				default:
-					$payload[ $key ] = sanitize_text_field( is_scalar( $raw ) ? $raw : '' );
+					$payload[ $key ] = mb_substr( sanitize_text_field( is_scalar( $raw ) ? $raw : '' ), 0, self::TEXT_MAX_LENGTH );
 					break;
 			}
 		}
@@ -271,14 +341,15 @@ class Pdlead_Rest_Controller {
 	}
 
 	/**
-	 * Collect the campaign tracking values from the request cookies.
+	 * Collect the values of the cookies listed in the settings. The plugin
+	 * never sets cookies; it only reads what the browser sends.
 	 *
 	 * @param int $form_id Form post ID.
 	 * @return array<string,string> Sanitized values keyed by name, empty values dropped.
 	 */
-	private static function collect_tracking( $form_id ) {
+	private static function collect_cookies( $form_id ) {
 		$data = array();
-		foreach ( self::TRACKING_COOKIES as $name ) {
+		foreach ( Pdlead_Settings::cookie_names() as $name ) {
 			$value = self::decode_cookie_value( self::read_cookie( $name ) );
 			if ( '' !== $value ) {
 				$data[ $name ] = $value;
@@ -293,13 +364,15 @@ class Pdlead_Rest_Controller {
 		}
 
 		/**
-		 * Filter the campaign tracking values before they are stored with a
-		 * submission and sent to Pipedrive. Remove a key to keep that value out.
+		 * Filter the cookie values before they are stored with a submission
+		 * and added to the lead note. Remove a key to keep that value out.
 		 *
 		 * @param array<string,string> $data    Values keyed by name.
 		 * @param int                  $form_id Form post ID.
 		 */
-		$data = (array) apply_filters( 'pdlead_tracking_data', $data, $form_id );
+		$data = apply_filters( 'pdlead_cookie_data', $data, $form_id );
+		// Former name of the filter, released in 1.6.0.
+		$data = (array) apply_filters_deprecated( 'pdlead_tracking_data', array( $data, $form_id ), '1.8.0', 'pdlead_cookie_data' );
 
 		$clean = array();
 		foreach ( $data as $name => $value ) {
@@ -312,7 +385,7 @@ class Pdlead_Rest_Controller {
 				continue;
 			}
 			$clean[ $name ] = $value;
-			if ( count( $clean ) >= self::TRACKING_MAX_ENTRIES ) {
+			if ( count( $clean ) >= self::COOKIE_MAX_ENTRIES ) {
 				break;
 			}
 		}
@@ -327,6 +400,8 @@ class Pdlead_Rest_Controller {
 	 * @return string Unslashed value, '' when missing or not a string.
 	 */
 	private static function read_cookie( $name ) {
+		// PHP stores a cookie named "a.b" as "a_b" in $_COOKIE.
+		$name = str_replace( '.', '_', $name );
 		if ( '' === $name || ! isset( $_COOKIE[ $name ] ) || ! is_scalar( $_COOKIE[ $name ] ) ) {
 			return '';
 		}
@@ -353,11 +428,11 @@ class Pdlead_Rest_Controller {
 	 * Sanitize a decoded cookie value: URLs as URLs, everything else as text.
 	 *
 	 * @param string $value Decoded value.
-	 * @return string Sanitized value, cut to TRACKING_MAX_LENGTH.
+	 * @return string Sanitized value, cut to COOKIE_MAX_LENGTH.
 	 */
 	private static function sanitize_cookie_value( $value ) {
 		$value = self::is_url( $value ) ? esc_url_raw( $value ) : sanitize_text_field( $value );
-		return mb_substr( $value, 0, self::TRACKING_MAX_LENGTH );
+		return mb_substr( $value, 0, self::COOKIE_MAX_LENGTH );
 	}
 
 	/**
@@ -390,8 +465,8 @@ class Pdlead_Rest_Controller {
 	private static function process_uploads( $fields, $files ) {
 		$group  = isset( $files['fields'] ) ? $files['fields'] : array();
 		$result = array(
-			'files' => array(),
-			'error' => false,
+			'files'   => array(),
+			'invalid' => array(),
 		);
 
 		foreach ( $fields as $field ) {
@@ -403,7 +478,7 @@ class Pdlead_Rest_Controller {
 
 			$handled = Pdlead_File_Store::handle_field_files( $key, $group );
 			if ( $handled['error'] ) {
-				$result['error'] = true;
+				$result['invalid'][] = $key;
 			}
 			$result['files'][ $key ] = $handled['files'];
 		}
@@ -467,8 +542,9 @@ class Pdlead_Rest_Controller {
 	 * @param array   $payload Sanitized values.
 	 * @param bool    $force   Always send, ignoring the setting (used when the
 	 *                         database write failed and this is the only copy).
+	 * @param bool    $attach  Attach the uploaded files.
 	 */
-	private static function backup_email( $form, $fields, $payload, $force ) {
+	private static function backup_email( $form, $fields, $payload, $force, $attach = true ) {
 		if ( ! $force && ! Pdlead_Settings::get( 'backup_on_every_submit' ) ) {
 			return;
 		}
@@ -492,8 +568,10 @@ class Pdlead_Rest_Controller {
 				$names = array();
 				foreach ( $value as $file ) {
 					if ( is_array( $file ) && ! empty( $file['file'] ) ) {
-						$names[]       = ! empty( $file['name'] ) ? $file['name'] : wp_basename( $file['file'] );
-						$attachments[] = Pdlead_File_Store::abs_path( $file['file'] );
+						$names[] = ! empty( $file['name'] ) ? $file['name'] : wp_basename( $file['file'] );
+						if ( $attach ) {
+							$attachments[] = Pdlead_File_Store::abs_path( $file['file'] );
+						}
 					}
 				}
 				if ( $names ) {
@@ -507,11 +585,11 @@ class Pdlead_Rest_Controller {
 			}
 		}
 
-		$tracking = isset( $payload[ Pdlead_Form_CPT::TRACKING_KEY ] ) ? $payload[ Pdlead_Form_CPT::TRACKING_KEY ] : array();
-		if ( is_array( $tracking ) && $tracking ) {
+		$cookies = isset( $payload[ Pdlead_Form_CPT::COOKIES_KEY ] ) ? $payload[ Pdlead_Form_CPT::COOKIES_KEY ] : array();
+		if ( is_array( $cookies ) && $cookies ) {
 			$lines[] = '';
-			$lines[] = __( 'Tracking:', 'pipedrive-lead-forms' );
-			foreach ( $tracking as $name => $value ) {
+			$lines[] = __( 'Cookies:', 'pipedrive-lead-forms' );
+			foreach ( $cookies as $name => $value ) {
 				$lines[] = $name . ': ' . $value;
 			}
 		}
@@ -554,9 +632,10 @@ class Pdlead_Rest_Controller {
 	 * @param string $message Human message.
 	 * @param int    $status  HTTP status.
 	 * @param int    $form_id Form post ID.
+	 * @param array  $extra   Additional response data, e.g. the invalid field keys.
 	 * @return WP_REST_Response
 	 */
-	private static function error( $code, $message, $status, $form_id = 0 ) {
+	private static function error( $code, $message, $status, $form_id = 0, $extra = array() ) {
 		if ( $form_id ) {
 			$custom = '';
 			if ( 'store_failed' === $code ) {
@@ -569,10 +648,13 @@ class Pdlead_Rest_Controller {
 			}
 		}
 		return new WP_REST_Response(
-			array(
-				'ok'      => false,
-				'code'    => $code,
-				'message' => $message,
+			array_merge(
+				array(
+					'ok'      => false,
+					'code'    => $code,
+					'message' => $message,
+				),
+				$extra
 			),
 			$status
 		);

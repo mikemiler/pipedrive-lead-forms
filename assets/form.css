@@ -26,6 +26,14 @@
 	width: 100%;
 	box-sizing: border-box;
 	padding: 0.6em;
+	/* Use the theme's typography instead of the browser default. The text
+	   color is left to the theme so inputs stay readable on dark designs. */
+	font: inherit;
+}
+
+.pdlead-row [aria-invalid="true"] {
+	border-color: #b32d2e;
+	outline: 1px solid #b32d2e;
 }
 
 .pdlead-row-check input {
@@ -62,8 +70,14 @@
 	margin: 1em 0 0;
 }
 
+/* The live region stays in the accessibility tree while empty, so the
+   first message is announced. Focus is set by script only. */
 .pdlead-status:empty {
-	display: none;
+	margin: 0;
+}
+
+.pdlead-status:focus {
+	outline: none;
 }
 
 .pdlead-status-error {

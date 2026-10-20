@@ -16,6 +16,17 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Pdlead_Bot_Guard {
 
+	/**
+	 * Submissions beyond this multiple of the rate limit are rejected instead
+	 * of held back.
+	 */
+	const RATE_REJECT_FACTOR = 3;
+
+	/**
+	 * Option set while Cloudflare rejects the configured Turnstile secret.
+	 */
+	const TURNSTILE_SECRET_REJECTED = 'pdlead_turnstile_secret_rejected';
+
 	const ACTION_ALLOW = 'allow';
 	const ACTION_FLAG  = 'flag';
 	const ACTION_DROP  = 'drop';
@@ -84,6 +95,11 @@ class Pdlead_Bot_Guard {
 	 * @return string
 	 */
 	public static function client_ip() {
+		if ( ! empty( $_SERVER['HTTP_CF_CONNECTING_IP'] ) && ! ( defined( 'PDLEAD_TRUST_CF_IP' ) && PDLEAD_TRUST_CF_IP ) && ! get_option( 'pdlead_cf_seen' ) ) {
+			// Behind Cloudflare without trusting its header every visitor shares
+			// the proxy IP; the settings page asks the owner to opt in.
+			update_option( 'pdlead_cf_seen', 1, false );
+		}
 		if ( defined( 'PDLEAD_TRUST_CF_IP' ) && PDLEAD_TRUST_CF_IP && ! empty( $_SERVER['HTTP_CF_CONNECTING_IP'] ) ) {
 			$ip = sanitize_text_field( wp_unslash( $_SERVER['HTTP_CF_CONNECTING_IP'] ) );
 			if ( filter_var( $ip, FILTER_VALIDATE_IP ) ) {
@@ -125,18 +141,12 @@ class Pdlead_Bot_Guard {
 			return self::result( self::ACTION_ERROR, 'expired', __( 'Your session expired. Please submit again.', 'pipedrive-lead-forms' ) );
 		}
 
-		// 3. Rate limit. Friendly error, never a silent drop.
-		if ( Pdlead_Settings::get( 'ratelimit_enabled' ) && '' !== $ip ) {
-			if ( self::is_rate_limited( self::ip_hash( $ip ) ) ) {
-				return self::result( self::ACTION_ERROR, 'rate_limited', __( 'Too many attempts. Please try again in a few minutes.', 'pipedrive-lead-forms' ) );
-			}
-		}
-
-		// 4. Turnstile (optional). A clear failure is a hard error so a real
-		// user can retry. A network error to Cloudflare fails open (we never
+		// 3. Turnstile (optional), before the rate limit so a held submission
+		// has passed the captcha too. A clear failure is a hard error so a real
+		// user can retry. A network or configuration error fails open (we never
 		// want to lose a lead) but flags the lead for review.
 		$soft_flag = false;
-		if ( Pdlead_Settings::get( 'turnstile_enabled' ) && Pdlead_Settings::get( 'turnstile_secret_key' ) ) {
+		if ( Pdlead_Settings::turnstile_active() ) {
 			$token  = isset( $params['cf-turnstile-response'] ) ? (string) $params['cf-turnstile-response'] : '';
 			$result = self::verify_turnstile( $token, $ip );
 			if ( 'fail' === $result ) {
@@ -144,6 +154,20 @@ class Pdlead_Bot_Guard {
 			}
 			if ( 'error' === $result ) {
 				$soft_flag = true;
+			}
+		}
+
+		// 4. Rate limit. Over the limit the submission is held back for review
+		// (visitors behind one proxy or office IP share the count); far over
+		// it, it is rejected so a flood cannot fill the table and the inbox.
+		if ( Pdlead_Settings::get( 'ratelimit_enabled' ) && '' !== $ip ) {
+			$count = self::count_attempt( self::ip_hash( $ip ) );
+			$max   = max( 1, (int) Pdlead_Settings::get( 'ratelimit_max' ) );
+			if ( $count > self::RATE_REJECT_FACTOR * $max ) {
+				return self::result( self::ACTION_ERROR, 'rate_blocked', __( 'Too many attempts. Please try again in a few minutes.', 'pipedrive-lead-forms' ) );
+			}
+			if ( $count > $max ) {
+				return self::result( self::ACTION_ERROR, 'rate_limited' );
 			}
 		}
 
@@ -177,13 +201,28 @@ class Pdlead_Bot_Guard {
 	}
 
 	/**
-	 * Fixed window per IP rate limiter using a transient.
+	 * Count a dropped (bot) attempt and tell whether this IP is far over the
+	 * rate limit, so a bot flood stops adding spam rows. Bots get their own
+	 * bucket: behind a shared IP they must not use up the real visitors' quota.
+	 *
+	 * @param string $ip Client IP.
+	 * @return bool
+	 */
+	public static function is_flooding( $ip ) {
+		if ( ! Pdlead_Settings::get( 'ratelimit_enabled' ) || '' === $ip ) {
+			return false;
+		}
+		$max = max( 1, (int) Pdlead_Settings::get( 'ratelimit_max' ) );
+		return self::count_attempt( 'spam_' . self::ip_hash( $ip ) ) > self::RATE_REJECT_FACTOR * $max;
+	}
+
+	/**
+	 * Count an attempt in the fixed per IP window and return the count.
 	 *
 	 * @param string $ip_hash Salted IP hash.
-	 * @return bool True when the limit is exceeded.
+	 * @return int Attempts in the current window, this one included.
 	 */
-	private static function is_rate_limited( $ip_hash ) {
-		$max    = max( 1, (int) Pdlead_Settings::get( 'ratelimit_max' ) );
+	private static function count_attempt( $ip_hash ) {
 		$window = max( 60, (int) Pdlead_Settings::get( 'ratelimit_window' ) );
 		$key    = 'pdlead_rl_' . $ip_hash;
 
@@ -200,7 +239,7 @@ class Pdlead_Bot_Guard {
 		++$bucket['count'];
 		set_transient( $key, $bucket, $window );
 
-		return $bucket['count'] > $max;
+		return (int) $bucket['count'];
 	}
 
 	/**
@@ -234,6 +273,21 @@ class Pdlead_Bot_Guard {
 		}
 
 		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-		return ! empty( $body['success'] ) ? 'pass' : 'fail';
+		if ( ! empty( $body['success'] ) ) {
+			delete_option( self::TURNSTILE_SECRET_REJECTED );
+			return 'pass';
+		}
+		// A wrong secret or a Cloudflare side problem is not the visitor's
+		// fault: fail open and flag, like an unreachable Cloudflare. A rejected
+		// secret is remembered so the admin notice can point to it.
+		$codes = isset( $body['error-codes'] ) ? (array) $body['error-codes'] : array();
+		if ( array_intersect( $codes, array( 'missing-input-secret', 'invalid-input-secret' ) ) ) {
+			update_option( self::TURNSTILE_SECRET_REJECTED, 1, false );
+			return 'error';
+		}
+		if ( in_array( 'internal-error', $codes, true ) ) {
+			return 'error';
+		}
+		return 'fail';
 	}
 }

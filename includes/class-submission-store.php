@@ -19,6 +19,8 @@ class Pdlead_Submission_Store {
 	const STATUS_SENT       = 'sent';
 	const STATUS_FAILED     = 'failed';
 	const STATUS_SPAM       = 'spam';
+	// Stored but not sent, e.g. over the rate limit. Released by hand in the log.
+	const STATUS_HELD = 'held';
 
 	/**
 	 * How long a claimed (processing) row stays locked before it is considered
@@ -298,6 +300,39 @@ class Pdlead_Submission_Store {
 		return array(
 			'rows'  => $rows ? $rows : array(),
 			'total' => $total,
+		);
+	}
+
+	/**
+	 * Count the rows that need the owner's attention.
+	 *
+	 * @return array { failed: int, held: int, stuck: int } Stuck means pending
+	 *               or processing for more than an hour.
+	 */
+	public static function attention_counts() {
+		global $wpdb;
+		$cutoff = gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS );
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery -- table() is a constant table name; all values are prepared. Counts change with every submission, so no caching.
+		$row = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT
+					SUM( status = %s ) AS failed,
+					SUM( status = %s ) AS held,
+					SUM( status IN ( %s, %s ) AND created_at < %s ) AS stuck
+				FROM ' . self::table(),
+				self::STATUS_FAILED,
+				self::STATUS_HELD,
+				self::STATUS_PENDING,
+				self::STATUS_PROCESSING,
+				$cutoff
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+		return array(
+			'failed' => isset( $row['failed'] ) ? (int) $row['failed'] : 0,
+			'held'   => isset( $row['held'] ) ? (int) $row['held'] : 0,
+			'stuck'  => isset( $row['stuck'] ) ? (int) $row['stuck'] : 0,
 		);
 	}
 

@@ -85,6 +85,11 @@
 	color: #555;
 }
 
+.pdlead-badge-held {
+	background: #fde2c8;
+	color: #9a5b00;
+}
+
 .pdlead-badge-flagged {
 	background: #fde2c8;
 	color: #9a5b00;
@@ -162,4 +167,14 @@
 .pdlead-custom-field-choice {
 	display: block;
 	margin: 0 0 0.35em;
+}
+
+/* Hint list of common cookies below the cookie list setting. */
+.pdlead-cookie-help {
+	list-style: disc;
+	margin: 0.5em 0 0 1.5em;
+}
+
+.pdlead-cookie-help li {
+	margin: 0 0 0.25em;
 }

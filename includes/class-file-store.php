@@ -45,8 +45,9 @@ class Pdlead_File_Store {
 
 	/**
 	 * Create the upload directory and harden it against direct access.
-	 * Best effort: .htaccess only protects Apache; on nginx the obscurity of
-	 * randomized filenames plus the admin-only download handler is the guard.
+	 * Best effort: .htaccess only protects Apache; on nginx the random filename
+	 * prefix (see unique_filename) keeps files from being guessed, and the
+	 * admin-only download handler is the intended way to fetch them.
 	 */
 	public static function ensure_protected() {
 		$dir = self::dir();
@@ -118,8 +119,9 @@ class Pdlead_File_Store {
 			$moved = wp_handle_upload(
 				$file,
 				array(
-					'test_form' => false,
-					'mimes'     => $mimes,
+					'test_form'                => false,
+					'mimes'                    => $mimes,
+					'unique_filename_callback' => array( __CLASS__, 'unique_filename' ),
 				)
 			);
 			remove_filter( 'upload_dir', array( __CLASS__, 'filter_upload_dir' ) );
@@ -165,9 +167,22 @@ class Pdlead_File_Store {
 	}
 
 	/**
-	 * Redirect wp_handle_upload into the protected subdirectory.
+	 * Name stored uploads with a random prefix so they cannot be guessed from
+	 * the visitor's file name, which matters where .htaccess is ignored (nginx).
 	 *
-	 * @param array $dirs Upload directory parts.
+	 * @param string $dir  Target directory.
+	 * @param string $name Sanitized file name including the extension.
+	 * @param string $ext  Extension including the dot.
+	 * @return string
+	 */
+	public static function unique_filename( $dir, $name, $ext ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundBeforeLastUsed, Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- signature of the wp_unique_filename callback.
+		return strtolower( wp_generate_password( 24, false ) ) . '-' . $name;
+	}
+
+	/**
+	 * Point wp_handle_upload at the protected plugin directory.
+	 *
+	 * @param array $dirs Upload dir data.
 	 * @return array
 	 */
 	public static function filter_upload_dir( $dirs ) {

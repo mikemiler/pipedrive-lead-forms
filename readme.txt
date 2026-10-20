@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.7.0
+Stable tag: 1.8.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -27,30 +27,35 @@ A Hidden field type sends a fixed value with every submission, for example to
 prefill a Pipedrive organization field. The value is set in the form editor,
 added on the server and never shown to the visitor.
 
-= Campaign tracking (UTM) =
+= Cookies =
 
-When HandL UTM Grabber is active, every submission carries the campaign values
-it stores in the visitor's browser: utm_source, utm_medium, utm_campaign,
-utm_term, utm_content, gclid, handl_landing_page and handl_original_ref. They
-are read when the form is submitted and appear as a "Tracking" block in the
-Pipedrive lead note, the backup email and the submission log.
+The plugin reads cookies that other plugins have stored in the visitor's
+browser and sends their values with the lead. It never sets cookies itself.
+Typical use: the UTM values of HandL UTM Grabber.
 
-The plugin never sets cookies itself. HandL only stores these values after the
-visitor gave marketing consent, so without consent nothing is sent. HandL keeps
-each parameter separately: a later visit with only utm_source updates
-utm_source and keeps the earlier utm_campaign.
+Which cookies are read is set under Settings > Cookies. By default these are
+the standard UTM parameters and the Google Ads click ID: utm_source,
+utm_medium, utm_campaign, utm_term, utm_content and gclid. With HandL UTM
+Grabber, add handl_original_ref (where the visitor originally came from) and
+handl_landing_page (the first page visited) to also send the referrer and
+landing page. Their values are read when the form is submitted and appear as a "Cookies" block in the Pipedrive lead note, the
+backup email and the submission log. Leave the list empty to add nothing.
 
-The note is readable but cannot be filtered in Pipedrive. To report on campaign
-values, add a "Cookie value" field per value to the form: enter the cookie name
-(for example utm_source) in the Options / value column and map it to a Pipedrive
-lead field. Leads share their custom fields with deals, so create the fields in
-Pipedrive as deal fields first. Cookie value fields work with any plugin that
-stores values in first-party cookies, not only HandL.
+HandL only stores its values after the visitor gave marketing consent, so
+without consent nothing is sent. HandL keeps each parameter separately: a later
+visit with only utm_source updates utm_source and keeps the earlier
+utm_campaign.
 
-To keep a value out of the note, remove it with the `pdlead_tracking_data`
+The note is readable but cannot be filtered in Pipedrive. To report on a value,
+add a "Cookie value" field to the form: pick the cookie name from the
+suggestions (the list from the settings) or type any other name, and map the
+field to a Pipedrive lead field. Leads share their custom fields with deals, so
+create the fields in Pipedrive as deal fields first.
+
+To keep a value out of the note, remove it with the `pdlead_cookie_data`
 filter:
 
-`add_filter( 'pdlead_tracking_data', function ( $data ) { unset( $data['gclid'] ); return $data; } );`
+`add_filter( 'pdlead_cookie_data', function ( $data ) { unset( $data['gclid'] ); return $data; } );`
 
 Updates are delivered via GitHub, not wordpress.org.
 
@@ -60,7 +65,43 @@ Updates are delivered via GitHub, not wordpress.org.
 2. Activate the plugin through the *Plugins* screen in WordPress.
 3. Configure your Pipedrive API token and forms under the plugin settings.
 
+= Hosting notes =
+
+* Behind Cloudflare, add `define( 'PDLEAD_TRUST_CF_IP', true );` to wp-config.php so the rate limit sees each visitor's real IP address. The settings page shows a reminder when Cloudflare is detected.
+* Uploaded files are stored in `wp-content/uploads/pdlead-uploads/` under random names. Apache is blocked from serving them by an .htaccess file. On nginx, add a rule such as `location ^~ /wp-content/uploads/pdlead-uploads/ { deny all; }` to the server block; files are downloaded through the submission log either way.
+* WP Rocket works without extra settings: the plugin excludes its script, its config and Turnstile from "Delay JavaScript execution", keeps its styles in "Remove Unused CSS" and clears the WP Rocket cache when a form or the settings are saved. With another page cache, clear the cache after changing a form, since the form is part of the cached page.
+* Leads are sent to Pipedrive right after the visitor gets the response (PHP-FPM or LiteSpeed). Failed attempts are retried by WP-Cron, so on a site with WP-Cron disabled a real system cron must call wp-cron.php.
+
 == Changelog ==
+
+= 1.8.0 =
+* New: the cookies the plugin reads are now set under Settings > Cookies instead of being fixed in the code. The list defaults to the standard UTM parameters and gclid. The same list feeds the suggestions of Cookie value fields in the form editor. An empty list adds no cookies to the note. Below the field, the settings page lists common cookies to add (Google Analytics, Google Ads, Meta, LinkedIn, Microsoft Ads, TikTok, HubSpot and HandL UTM Grabber).
+* Changed: handl_landing_page and handl_original_ref (HandL UTM Grabber only) are no longer read by default. Sites using HandL that want the landing page and original referrer in the note add both names under Settings > Cookies after updating.
+* Changed: the note, backup email and submission log block is now called "Cookies" instead of "Tracking", since the cookies can hold any value.
+* Removed: the "Company domain" setting. The API token already identifies the Pipedrive account, so all requests now go to the shared host api.pipedrive.com. A previously saved domain is ignored and dropped on the next save; nothing needs to be changed.
+* Changed: the filter `pdlead_tracking_data` is renamed to `pdlead_cookie_data`. The old name still works and triggers a deprecation notice.
+* Changed: leads are sent to Pipedrive after the visitor already has the response, so a slow Pipedrive API no longer delays or times out the form.
+* Changed: submissions over the rate limit are no longer rejected. They are stored with the new status "Held", are not sent to Pipedrive, and can be released with "Send to Pipedrive" in the submission log. Behind a proxy or office network real visitors share one IP address, so no lead is lost to the limit any more. Beyond three times the limit submissions are still rejected, so a flood cannot fill the log, and the backup email of a held submission carries no attachments. Turnstile is now checked before the rate limit.
+* New: "Discard" for held and failed submissions in the log, after a confirmation. It marks them as spam, so they are never sent and the regular cleanup removes them.
+* New: WP Rocket support out of the box. The form script, its config and Turnstile are excluded from "Delay JavaScript execution", the form styles are kept by "Remove Unused CSS", and the WP Rocket cache is cleared when a form or the plugin settings are saved.
+* Fix: a bot flooding the honeypot far over the rate limit no longer adds a spam row per request.
+* Changed: lead forms can only be created and edited by administrators.
+* New: an admin notice on every admin screen lists failed, held and long waiting submissions, so a problem is noticed even when no email arrives.
+* New: the submission log shows a warning when the lead note or a file attachment could not be added in Pipedrive.
+* New: form validation errors name the affected fields: they are marked, focused and announced to screen readers; files over the upload limits are caught before sending with a clear message.
+* Fix: uploaded files are stored under random names, so they cannot be guessed on servers that ignore .htaccess (nginx). Files uploaded before 1.8.0 keep their names: on nginx add the deny rule from the hosting notes.
+* Fix: the form now also works when an optimizer loads the script late, and never falls back to sending the values in the page URL.
+* Fix: several forms on one page, or the same form twice, no longer share element IDs.
+* Fix: Turnstile only runs when it is fully configured, and a wrong secret key or a Cloudflare problem no longer blocks every visitor; such submissions are flagged instead, and an admin notice reports a secret key Cloudflare rejects.
+* Fix: a request over the server upload limit (PHP or nginx) now reports that the files are too large instead of an expired session or a generic error.
+* Fix: email addresses with characters such as umlauts are rejected instead of being silently changed into a different address.
+* Fix: text values are capped (255 characters, 20,000 for text areas) so Pipedrive does not reject them.
+* Fix: a retry after the organization was already created keeps the organization values in the note.
+* Fix: a submission whose form was deleted fails with a clear message instead of creating an empty lead.
+* Fix: file fields always attach their files, whatever they are mapped to, and a new file field is mapped to "Lead: File attachment" by default.
+* Fix: cookie names containing a dot are read correctly.
+* Fix: the form inherits the theme's font, keeps the theme's text colors and uses the theme's button style on block themes.
+* Fix: uninstalling also deletes the uploaded files, also where WordPress has no direct filesystem access.
 
 = 1.7.0 =
 * New: map form fields to Pipedrive lead fields (the custom fields leads share with deals), next to the person and organization targets. Choice fields match the Pipedrive option labels. Values Pipedrive cannot accept are added to the lead note instead; if Pipedrive rejects the lead over a field value, the lead is created without the mapped lead fields and all their values go to the note, so no lead is lost.

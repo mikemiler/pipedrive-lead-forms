@@ -51,7 +51,27 @@ class Pdlead_Admin_Settings {
 	}
 
 	/**
-	 * Load the admin stylesheet on the settings page only (for the lead label swatches).
+	 * Well-known first-party cookies offered as a hint below the cookie list.
+	 *
+	 * @return array<string,string> Cookie name => what it holds.
+	 */
+	private static function common_cookies() {
+		return array(
+			'_ga'                => __( 'Google Analytics client ID, links the lead to the visitor in GA4.', 'pipedrive-lead-forms' ),
+			'_gcl_aw'            => __( 'Google Ads click ID as stored by Google itself (conversion linker).', 'pipedrive-lead-forms' ),
+			'_fbp'               => __( 'Meta Pixel browser ID.', 'pipedrive-lead-forms' ),
+			'_fbc'               => __( 'Meta (Facebook, Instagram) click ID, used for the Conversions API.', 'pipedrive-lead-forms' ),
+			'li_fat_id'          => __( 'LinkedIn Insight Tag click ID.', 'pipedrive-lead-forms' ),
+			'_uetmsclkid'        => __( 'Microsoft Ads (Bing) click ID.', 'pipedrive-lead-forms' ),
+			'ttclid'             => __( 'TikTok Pixel click ID.', 'pipedrive-lead-forms' ),
+			'hubspotutk'         => __( 'HubSpot visitor token.', 'pipedrive-lead-forms' ),
+			'handl_original_ref' => __( 'Where the visitor originally came from (referrer). Requires the HandL UTM Grabber plugin.', 'pipedrive-lead-forms' ),
+			'handl_landing_page' => __( 'The first page the visitor landed on. Requires the HandL UTM Grabber plugin.', 'pipedrive-lead-forms' ),
+		);
+	}
+
+	/**
+	 * Load the admin stylesheet on the settings page only (label swatches, cookie hints).
 	 *
 	 * @param string $hook_suffix Current admin page hook suffix.
 	 */
@@ -88,8 +108,6 @@ class Pdlead_Admin_Settings {
 		$existing = Pdlead_Settings::all();
 		$out      = Pdlead_Settings::defaults();
 
-		$out['company_domain'] = isset( $input['company_domain'] ) ? sanitize_text_field( $input['company_domain'] ) : '';
-
 		// Token first: keep the stored value if the field is left blank, and
 		// ignore it entirely when a wp-config constant is in use. It is resolved
 		// before the ID checks below so they validate against the account of the
@@ -103,9 +121,9 @@ class Pdlead_Admin_Settings {
 		}
 		$effective_token = Pdlead_Settings::token_is_constant() ? Pdlead_Settings::api_token() : $out['api_token'];
 
-		// Client for validating account-scoped IDs, honoring a token or company
-		// domain changed in this same save.
-		$client = new Pdlead_Pipedrive_Client( $effective_token, $out['company_domain'] );
+		// Client for validating account-scoped IDs, honoring a token changed in
+		// this same save.
+		$client = new Pdlead_Pipedrive_Client( $effective_token );
 
 		$out['turnstile_enabled']      = empty( $input['turnstile_enabled'] ) ? 0 : 1;
 		$out['turnstile_site_key']     = isset( $input['turnstile_site_key'] ) ? sanitize_text_field( $input['turnstile_site_key'] ) : '';
@@ -118,6 +136,8 @@ class Pdlead_Admin_Settings {
 		$out['backup_on_every_submit'] = empty( $input['backup_on_every_submit'] ) ? 0 : 1;
 		$out['notify_email']           = isset( $input['notify_email'] ) ? sanitize_email( $input['notify_email'] ) : '';
 		$out['retention_days']         = max( 0, (int) ( $input['retention_days'] ?? 90 ) );
+		// Keep the stored list when the field was not part of the save.
+		$out['cookie_names'] = isset( $input['cookie_names'] ) ? implode( ', ', Pdlead_Settings::parse_cookie_names( $input['cookie_names'] ) ) : $existing['cookie_names'];
 		$out['max_attempts']           = max( 1, (int) ( $input['max_attempts'] ?? 6 ) );
 		// Owner: reject IDs that do not exist in the connected account. When the
 		// users cannot be loaded the submitted value is kept, so an API hiccup
@@ -260,18 +280,23 @@ class Pdlead_Admin_Settings {
 
 			<?php settings_errors(); ?>
 
+			<?php if ( get_option( 'pdlead_cf_seen' ) && ! ( defined( 'PDLEAD_TRUST_CF_IP' ) && PDLEAD_TRUST_CF_IP ) ) : ?>
+				<div class="notice notice-warning"><p>
+					<?php
+					printf(
+						/* translators: %s: PHP code to add to wp-config.php. */
+						esc_html__( 'This site runs behind Cloudflare. Add %s to wp-config.php so the rate limit sees each visitor\'s real IP address. Until then all visitors share Cloudflare\'s addresses, and submissions over the limit are held back in the submission log.', 'pipedrive-lead-forms' ),
+						'<code>define( \'PDLEAD_TRUST_CF_IP\', true );</code>'
+					);
+					?>
+				</p></div>
+			<?php endif; ?>
+
 			<form method="post" action="options.php">
 				<?php settings_fields( self::GROUP ); ?>
 
 				<h2><?php esc_html_e( 'Pipedrive connection', 'pipedrive-lead-forms' ); ?></h2>
 				<table class="form-table" role="presentation">
-					<tr>
-						<th scope="row"><label for="pdlead_company_domain"><?php esc_html_e( 'Company domain', 'pipedrive-lead-forms' ); ?></label></th>
-						<td>
-							<input type="text" id="pdlead_company_domain" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[company_domain]" value="<?php echo esc_attr( $s['company_domain'] ); ?>" class="regular-text" placeholder="acme" />
-							<p class="description"><?php esc_html_e( 'Your Pipedrive subdomain, for example "acme" for acme.pipedrive.com. Leave empty to use the shared API host.', 'pipedrive-lead-forms' ); ?></p>
-						</td>
-					</tr>
 					<tr>
 						<th scope="row"><label for="pdlead_api_token"><?php esc_html_e( 'API token', 'pipedrive-lead-forms' ); ?></label></th>
 						<td>
@@ -374,6 +399,29 @@ class Pdlead_Admin_Settings {
 					<tr>
 						<th scope="row"><label for="pdlead_max_attempts"><?php esc_html_e( 'Max retry attempts', 'pipedrive-lead-forms' ); ?></label></th>
 						<td><input type="number" id="pdlead_max_attempts" min="1" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[max_attempts]" value="<?php echo esc_attr( $s['max_attempts'] ); ?>" class="small-text" /></td>
+					</tr>
+				</table>
+
+				<h2><?php esc_html_e( 'Cookies', 'pipedrive-lead-forms' ); ?></h2>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="pdlead_cookie_names"><?php esc_html_e( 'Cookies to read', 'pipedrive-lead-forms' ); ?></label></th>
+						<td>
+							<textarea id="pdlead_cookie_names" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[cookie_names]" rows="3" class="large-text code"><?php echo esc_textarea( $s['cookie_names'] ); ?></textarea>
+							<p class="description"><?php esc_html_e( 'Comma separated cookie names. The values of these cookies are read at every submission and added to the lead note. They are also suggested for Cookie value fields in the form editor, which map a cookie to a Pipedrive field. The plugin never sets cookies; it only reads cookies other plugins have stored, for example the UTM values of HandL UTM Grabber. Leave empty to add no cookies to the note.', 'pipedrive-lead-forms' ); ?></p>
+							<p class="description">
+								<?php
+								/* translators: %s: default cookie names. */
+								printf( esc_html__( 'Default: %s', 'pipedrive-lead-forms' ), esc_html( implode( ', ', Pdlead_Settings::DEFAULT_COOKIE_NAMES ) ) );
+								?>
+							</p>
+							<p class="description"><?php esc_html_e( 'Other common cookies you can add. Each one only has a value when the tool that sets it is active on the site and the visitor gave consent.', 'pipedrive-lead-forms' ); ?></p>
+							<ul class="pdlead-cookie-help">
+								<?php foreach ( self::common_cookies() as $cookie_name => $cookie_info ) : ?>
+									<li><code><?php echo esc_html( $cookie_name ); ?></code> <?php echo esc_html( $cookie_info ); ?></li>
+								<?php endforeach; ?>
+							</ul>
+						</td>
 					</tr>
 				</table>
 

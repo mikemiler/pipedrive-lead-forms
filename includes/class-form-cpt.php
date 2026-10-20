@@ -33,10 +33,11 @@ class Pdlead_Form_CPT {
 	const LEAD_FIELD_PREFIX = 'lead_field:';
 
 	/**
-	 * Reserved payload key holding the campaign tracking values of a
-	 * submission. No form field may use it as its key.
+	 * Reserved payload key holding the cookie values of a submission. No form
+	 * field may use it as its key. The value predates the generic cookie
+	 * naming and is kept so stored submissions stay readable.
 	 */
-	const TRACKING_KEY = '_tracking';
+	const COOKIES_KEY = '_tracking';
 
 	/**
 	 * Supported field types.
@@ -140,7 +141,22 @@ class Pdlead_Form_CPT {
 				'menu_icon'           => 'dashicons-feedback',
 				'menu_position'       => 26,
 				'supports'            => array( 'title' ),
+				// Forms carry the Pipedrive mapping, so only administrators may
+				// manage them, like the plugin settings.
 				'capability_type'     => 'post',
+				'capabilities'        => array(
+					'edit_posts'             => 'manage_options',
+					'edit_others_posts'      => 'manage_options',
+					'edit_published_posts'   => 'manage_options',
+					'edit_private_posts'     => 'manage_options',
+					'publish_posts'          => 'manage_options',
+					'read_private_posts'     => 'manage_options',
+					'delete_posts'           => 'manage_options',
+					'delete_others_posts'    => 'manage_options',
+					'delete_published_posts' => 'manage_options',
+					'delete_private_posts'   => 'manage_options',
+					'create_posts'           => 'manage_options',
+				),
 				'map_meta_cap'        => true,
 				'exclude_from_search' => true,
 				'has_archive'         => false,
@@ -303,7 +319,7 @@ class Pdlead_Form_CPT {
 		echo '<p class="description">' . esc_html__( 'Define the fields shown in the form and how each maps to Pipedrive. At least one field should map to Person: Email.', 'pipedrive-lead-forms' ) . '</p>';
 		echo '<p class="description">' . esc_html__( 'Organization fields are only sent when a field maps to Organization: Name. For Pipedrive choice fields use a Select field whose options match the Pipedrive option labels. Values Pipedrive cannot accept, and all values when an organization with the same name already exists, are added to the lead note instead.', 'pipedrive-lead-forms' ) . '</p>';
 		echo '<p class="description">' . esc_html__( 'Lead fields are the custom fields leads share with deals in Pipedrive. Values Pipedrive cannot accept are added to the lead note instead.', 'pipedrive-lead-forms' ) . '</p>';
-		echo '<p class="description">' . esc_html__( 'For Hidden fields, enter the fixed value in the Options / value column. For Cookie value fields, pick the cookie to read from the suggestions (HandL UTM Grabber names) or type any other cookie name. Both are added on the server at submission and never shown to the visitor.', 'pipedrive-lead-forms' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'For Hidden fields, enter the fixed value in the Options / value column. For Cookie value fields, pick the cookie to read from the suggestions (the cookies listed in the settings) or type any other cookie name. Both are added on the server at submission and never shown to the visitor.', 'pipedrive-lead-forms' ) . '</p>';
 		if ( null === $pd_fields['org'] || null === $pd_fields['lead'] ) {
 			echo '<p class="description">' . esc_html__( 'Pipedrive organization or lead fields could not be loaded. Save a valid API token and run "Test Pipedrive connection" in the settings to map form fields to them.', 'pipedrive-lead-forms' ) . '</p>';
 		}
@@ -326,7 +342,7 @@ class Pdlead_Form_CPT {
 		echo '</tbody></table>';
 
 		echo '<datalist id="pdlead-cookie-names">';
-		foreach ( Pdlead_Rest_Controller::TRACKING_COOKIES as $cookie_name ) {
+		foreach ( Pdlead_Settings::cookie_names() as $cookie_name ) {
 			echo '<option value="' . esc_attr( $cookie_name ) . '"></option>';
 		}
 		echo '</datalist>';
@@ -523,10 +539,10 @@ class Pdlead_Form_CPT {
 		$maps     = isset( $_POST['pdlead_field_map'] ) ? (array) wp_unslash( $_POST['pdlead_field_map'] ) : array();
 		$consents = isset( $_POST['pdlead_field_consent'] ) ? (array) wp_unslash( $_POST['pdlead_field_consent'] ) : array();
 
-		// $used_keys is seeded with the reserved tracking key so no field can claim it.
+		// $used_keys is seeded with the reserved cookies key so no field can claim it.
 		$valid_types = array_keys( self::field_types() );
 		$valid_maps  = array_keys( self::map_targets() );
-		$used_keys   = array( self::TRACKING_KEY => true );
+		$used_keys   = array( self::COOKIES_KEY => true );
 		$fields      = array();
 
 		$count = count( $labels );

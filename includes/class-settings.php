@@ -17,13 +17,38 @@ class Pdlead_Settings {
 	const OPTION = 'pdlead_settings';
 
 	/**
+	 * Pipedrive API base URLs. The API token identifies the account, so the
+	 * shared host works for every company. Organizations and persons are only
+	 * supported on v2; unlike v1, the v2 host also needs the /api prefix.
+	 */
+	const API_BASE_V1 = 'https://api.pipedrive.com/v1';
+	const API_BASE_V2 = 'https://api.pipedrive.com/api/v2';
+
+	/**
+	 * Default cookies: the standard UTM parameters and the Google Ads click ID,
+	 * under the plain parameter names most UTM plugins store them with.
+	 */
+	const DEFAULT_COOKIE_NAMES = array(
+		'utm_source',
+		'utm_medium',
+		'utm_campaign',
+		'utm_term',
+		'utm_content',
+		'gclid',
+	);
+
+	/**
+	 * Maximum number of cookies.
+	 */
+	const MAX_COOKIE_NAMES = 20;
+
+	/**
 	 * Default settings.
 	 *
 	 * @return array
 	 */
 	public static function defaults() {
 		return array(
-			'company_domain'          => '',
 			'api_token'               => '',
 			'turnstile_enabled'       => 0,
 			'turnstile_site_key'      => '',
@@ -44,7 +69,46 @@ class Pdlead_Settings {
 			'custom_field_option_ids' => '',
 			'file_max_size_mb'        => 10,
 			'file_allowed_ext'        => '',
+			'cookie_names'            => implode( ', ', self::DEFAULT_COOKIE_NAMES ),
 		);
+	}
+
+	/**
+	 * The cookies read at every submission and added to the lead note. They
+	 * are also suggested for Cookie value fields in the form editor.
+	 *
+	 * @return string[]
+	 */
+	public static function cookie_names() {
+		return self::parse_cookie_names( self::get( 'cookie_names', '' ) );
+	}
+
+	/**
+	 * Split a comma or whitespace separated list into valid, unique cookie names.
+	 *
+	 * @param string $raw Raw list.
+	 * @return string[]
+	 */
+	public static function parse_cookie_names( $raw ) {
+		$names = preg_split( '/[\s,]+/', (string) $raw, -1, PREG_SPLIT_NO_EMPTY );
+		$names = array_map(
+			static function ( $name ) {
+				return preg_replace( '/[^A-Za-z0-9_.-]/', '', $name );
+			},
+			$names
+		);
+		$names = array_values( array_unique( array_filter( $names, 'strlen' ) ) );
+		return array_slice( $names, 0, self::MAX_COOKIE_NAMES );
+	}
+
+	/**
+	 * Whether Turnstile is fully configured. The front end and the server check
+	 * the same condition, so a half configured captcha never blocks everyone.
+	 *
+	 * @return bool
+	 */
+	public static function turnstile_active() {
+		return self::get( 'turnstile_enabled' ) && '' !== (string) self::get( 'turnstile_site_key' ) && '' !== (string) self::get( 'turnstile_secret_key' );
 	}
 
 	/**
@@ -95,58 +159,6 @@ class Pdlead_Settings {
 	 */
 	public static function token_is_constant() {
 		return defined( 'PDLEAD_PIPEDRIVE_TOKEN' ) && PDLEAD_PIPEDRIVE_TOKEN;
-	}
-
-	/**
-	 * Base API host. Uses the company domain when provided, else the shared host.
-	 *
-	 * @return string
-	 */
-	public static function api_base() {
-		return self::api_base_for_domain( (string) self::get( 'company_domain', '' ) );
-	}
-
-	/**
-	 * Build the API base URL for a given company domain value.
-	 *
-	 * @param string $domain Raw company domain setting value.
-	 * @return string
-	 */
-	public static function api_base_for_domain( $domain ) {
-		$slug = self::domain_slug( $domain );
-		return '' !== $slug ? 'https://' . $slug . '.pipedrive.com/api/v1' : 'https://api.pipedrive.com/v1';
-	}
-
-	/**
-	 * Build the API v2 base URL for a given company domain value.
-	 *
-	 * Organizations and persons are only supported on v2. Unlike v1, the shared
-	 * host also needs the /api prefix.
-	 *
-	 * @param string $domain Raw company domain setting value.
-	 * @return string
-	 */
-	public static function api_base_v2_for_domain( $domain ) {
-		$slug = self::domain_slug( $domain );
-		return '' !== $slug ? 'https://' . $slug . '.pipedrive.com/api/v2' : 'https://api.pipedrive.com/api/v2';
-	}
-
-	/**
-	 * Reduce a company domain setting value to the bare subdomain.
-	 *
-	 * @param string $domain Raw value, e.g. "acme" or "https://acme.pipedrive.com".
-	 * @return string Subdomain, or '' when none is set.
-	 */
-	private static function domain_slug( $domain ) {
-		$domain = trim( (string) $domain );
-		if ( '' === $domain ) {
-			return '';
-		}
-		// Accept either "acme" or "acme.pipedrive.com".
-		$domain = preg_replace( '#^https?://#', '', $domain );
-		$domain = preg_replace( '#\.pipedrive\.com.*$#', '', $domain );
-		$domain = preg_replace( '#[^a-z0-9-].*$#i', '', $domain );
-		return (string) $domain;
 	}
 
 	/**

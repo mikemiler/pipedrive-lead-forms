@@ -51,23 +51,14 @@ class Pdlead_Pipedrive_Client {
 	private $token_override;
 
 	/**
-	 * Optional company domain override.
+	 * The override lets the settings sanitizer validate against the token being
+	 * saved before it is persisted; every other caller uses the stored token
+	 * via the null default.
 	 *
-	 * @var string|null
+	 * @param string|null $token Optional API token override.
 	 */
-	private $domain_override;
-
-	/**
-	 * The overrides let the settings sanitizer validate against the token and
-	 * company domain being saved before they are persisted; every other caller
-	 * uses the stored settings via the null defaults.
-	 *
-	 * @param string|null $token  Optional API token override.
-	 * @param string|null $domain Optional company domain override (raw setting value).
-	 */
-	public function __construct( $token = null, $domain = null ) {
-		$this->token_override  = $token;
-		$this->domain_override = $domain;
+	public function __construct( $token = null ) {
+		$this->token_override = $token;
 	}
 
 	/**
@@ -80,14 +71,13 @@ class Pdlead_Pipedrive_Client {
 	}
 
 	/**
-	 * Resolve the API base URL for an API version, preferring the override.
+	 * Resolve the API base URL for an API version.
 	 *
 	 * @param string $version API version, 'v1' or 'v2'.
 	 * @return string
 	 */
 	private function base_url( $version ) {
-		$domain = null !== $this->domain_override ? (string) $this->domain_override : (string) Pdlead_Settings::get( 'company_domain', '' );
-		return 'v2' === $version ? Pdlead_Settings::api_base_v2_for_domain( $domain ) : Pdlead_Settings::api_base_for_domain( $domain );
+		return 'v2' === $version ? Pdlead_Settings::API_BASE_V2 : Pdlead_Settings::API_BASE_V1;
 	}
 
 	/**

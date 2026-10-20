@@ -44,12 +44,12 @@ class Pdlead_Lead_Dispatcher {
 			'lead_fields' => array(),
 			'notes'       => array(),
 			'files'       => array(),
-			'tracking'    => array(),
+			'cookies'     => array(),
 		);
 
-		// Campaign tracking values captured at submission.
-		if ( isset( $payload[ Pdlead_Form_CPT::TRACKING_KEY ] ) && is_array( $payload[ Pdlead_Form_CPT::TRACKING_KEY ] ) ) {
-			$mapped['tracking'] = $payload[ Pdlead_Form_CPT::TRACKING_KEY ];
+		// Cookie values captured at submission.
+		if ( isset( $payload[ Pdlead_Form_CPT::COOKIES_KEY ] ) && is_array( $payload[ Pdlead_Form_CPT::COOKIES_KEY ] ) ) {
+			$mapped['cookies'] = $payload[ Pdlead_Form_CPT::COOKIES_KEY ];
 		}
 
 		foreach ( $fields as $field ) {
@@ -60,10 +60,11 @@ class Pdlead_Lead_Dispatcher {
 				continue;
 			}
 
-			// File attachments carry metadata arrays, not a scalar value, and
-			// are uploaded separately after the lead exists.
-			if ( 'file' === $map ) {
-				if ( is_array( $payload[ $key ] ) ) {
+			// File fields carry metadata arrays, not a scalar value. Their files
+			// are attached to the lead after it exists, whatever the mapping
+			// says, unless the field is explicitly not sent.
+			if ( is_array( $payload[ $key ] ) ) {
+				if ( 'none' !== $map ) {
 					foreach ( $payload[ $key ] as $file ) {
 						if ( is_array( $file ) && ! empty( $file['file'] ) ) {
 							$mapped['files'][] = $file;
@@ -73,8 +74,7 @@ class Pdlead_Lead_Dispatcher {
 				continue;
 			}
 
-			$value = is_array( $payload[ $key ] ) ? implode( ', ', $payload[ $key ] ) : (string) $payload[ $key ];
-			$value = trim( $value );
+			$value = trim( (string) $payload[ $key ] );
 			if ( '' === $value ) {
 				continue;
 			}
@@ -165,6 +165,18 @@ class Pdlead_Lead_Dispatcher {
 		if ( ! is_array( $payload ) ) {
 			$payload = array();
 		}
+		// A deleted form (or one without fields) cannot be mapped; sending would
+		// create an empty "Website lead". Fail visibly instead.
+		if ( ! Pdlead_Form_CPT::get_fields( (int) $row['form_id'] ) ) {
+			return self::handle_failure(
+				$id,
+				$row,
+				array(
+					'retryable' => false,
+					'error'     => __( 'The form of this submission was deleted or has no fields, so it cannot be mapped to Pipedrive. The data is kept in the log and the backup email.', 'pipedrive-lead-forms' ),
+				)
+			);
+		}
 		$mapped = self::map( (int) $row['form_id'], $payload );
 
 		$client      = new Pdlead_Pipedrive_Client();
@@ -219,6 +231,12 @@ class Pdlead_Lead_Dispatcher {
 				$mapped['notes'][] = $item['label'] . ': ' . $item['value'];
 			}
 			Pdlead_Submission_Store::update( $id, array( 'pipedrive_org_id' => $org_id ) );
+		} elseif ( $row['pipedrive_org_id'] && '' === $lead_id ) {
+			// Retry after the organization step succeeded earlier: which values
+			// were not accepted then is unknown, so keep all of them in the note.
+			foreach ( $mapped['org_fields'] as $item ) {
+				$mapped['notes'][] = $item['label'] . ': ' . $item['value'];
+			}
 		}
 
 		// Step 2: person. Reuse an existing person by email to avoid duplicates.
@@ -369,19 +387,26 @@ class Pdlead_Lead_Dispatcher {
 
 		// Step 4: note (secondary). A note failure must not block the lead nor
 		// trigger a retry, otherwise the lead would be recreated. Best effort.
-		// The tracking block goes last, after any organization leftover lines.
+		// The cookies block goes last, after any leftover field lines.
 		$notes = $mapped['notes'];
-		if ( ! empty( $mapped['tracking'] ) ) {
+		if ( ! empty( $mapped['cookies'] ) ) {
 			if ( $notes ) {
 				$notes[] = '';
 			}
-			$notes[] = __( 'Tracking:', 'pipedrive-lead-forms' );
-			foreach ( $mapped['tracking'] as $name => $value ) {
+			$notes[] = __( 'Cookies:', 'pipedrive-lead-forms' );
+			foreach ( $mapped['cookies'] as $name => $value ) {
 				$notes[] = $name . ': ' . $value;
 			}
 		}
 		if ( ! empty( $notes ) && '' !== $lead_id ) {
-			$client->create_note( implode( "\n", $notes ), $lead_id );
+			$res = $client->create_note( implode( "\n", $notes ), $lead_id );
+			if ( ! $res['ok'] ) {
+				$warnings[] = sprintf(
+					/* translators: %s: Pipedrive error message. */
+					__( 'Lead note could not be added (%s); its content is in the log and the backup email', 'pipedrive-lead-forms' ),
+					$res['error']
+				);
+			}
 		}
 
 		// Step 4b: file attachments (secondary, best effort like the note). A
@@ -390,7 +415,15 @@ class Pdlead_Lead_Dispatcher {
 			foreach ( $mapped['files'] as $file ) {
 				$path = Pdlead_File_Store::abs_path( $file['file'] );
 				$name = ! empty( $file['name'] ) ? $file['name'] : wp_basename( $file['file'] );
-				$client->upload_file( $path, $name, $lead_id );
+				$res  = $client->upload_file( $path, $name, $lead_id );
+				if ( ! $res['ok'] ) {
+					$warnings[] = sprintf(
+						/* translators: 1: file name, 2: Pipedrive error message. */
+						__( 'File %1$s could not be attached (%2$s); download it from the log', 'pipedrive-lead-forms' ),
+						$name,
+						$res['error']
+					);
+				}
 			}
 		}
 

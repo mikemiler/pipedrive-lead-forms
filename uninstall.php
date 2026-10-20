@@ -20,6 +20,8 @@ $wpdb->query( "DROP TABLE IF EXISTS {$pdlead_table}" ); // phpcs:ignore WordPres
 delete_option( 'pdlead_settings' );
 delete_option( 'pdlead_db_version' );
 delete_option( 'pdlead_hmac_secret' );
+delete_option( 'pdlead_cf_seen' );
+delete_option( 'pdlead_turnstile_secret_rejected' );
 delete_transient( 'pdlead_org_fields' );
 delete_transient( 'pdlead_lead_fields' );
 
@@ -34,6 +36,27 @@ $pdlead_forms = get_posts(
 );
 foreach ( $pdlead_forms as $pdlead_form_id ) {
 	wp_delete_post( $pdlead_form_id, true );
+}
+
+// Delete uploaded files (personal documents such as CVs).
+$pdlead_uploads = wp_upload_dir();
+$pdlead_dir     = trailingslashit( $pdlead_uploads['basedir'] ) . 'pdlead-uploads';
+if ( is_dir( $pdlead_dir ) ) {
+	require_once ABSPATH . 'wp-admin/includes/file.php';
+	if ( WP_Filesystem() ) {
+		global $wp_filesystem;
+		$wp_filesystem->rmdir( $pdlead_dir, true );
+	}
+	// Without direct filesystem access (FTP credentials needed) delete the
+	// flat directory by hand.
+	if ( is_dir( $pdlead_dir ) ) {
+		foreach ( (array) scandir( $pdlead_dir ) as $pdlead_file ) {
+			if ( '.' !== $pdlead_file && '..' !== $pdlead_file ) {
+				wp_delete_file( trailingslashit( $pdlead_dir ) . $pdlead_file );
+			}
+		}
+		rmdir( $pdlead_dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- WP_Filesystem was not available above.
+	}
 }
 
 // Clear scheduled events.

@@ -25,8 +25,52 @@ class Pdlead_Admin_Log {
 		add_action( 'admin_menu', array( __CLASS__, 'add_page' ) );
 		add_action( 'admin_post_pdlead_retry', array( __CLASS__, 'handle_retry' ) );
 		add_action( 'admin_post_pdlead_retry_all', array( __CLASS__, 'handle_retry_all' ) );
+		add_action( 'admin_post_pdlead_discard', array( __CLASS__, 'handle_discard' ) );
 		add_action( 'admin_post_pdlead_download', array( __CLASS__, 'handle_download' ) );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue' ) );
+		add_action( 'admin_notices', array( __CLASS__, 'attention_notice' ) );
+	}
+
+	/**
+	 * Tell administrators about leads that did not reach Pipedrive, on every
+	 * admin screen, so a problem is noticed even when no email arrives.
+	 */
+	public static function attention_notice() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$counts = Pdlead_Submission_Store::attention_counts();
+		$parts  = array();
+		if ( $counts['failed'] ) {
+			/* translators: %d: number of submissions. */
+			$parts[] = sprintf( _n( '%d failed', '%d failed', $counts['failed'], 'pipedrive-lead-forms' ), $counts['failed'] );
+		}
+		if ( $counts['held'] ) {
+			/* translators: %d: number of submissions. */
+			$parts[] = sprintf( _n( '%d held back (not sent)', '%d held back (not sent)', $counts['held'], 'pipedrive-lead-forms' ), $counts['held'] );
+		}
+		if ( $counts['stuck'] ) {
+			/* translators: %d: number of submissions. */
+			$parts[] = sprintf( _n( '%d waiting for more than an hour', '%d waiting for more than an hour', $counts['stuck'], 'pipedrive-lead-forms' ), $counts['stuck'] );
+		}
+		if ( get_option( Pdlead_Bot_Guard::TURNSTILE_SECRET_REJECTED ) ) {
+			printf(
+				'<div class="notice notice-error"><p><strong>%1$s</strong> %2$s</p></div>',
+				esc_html__( 'Pipedrive Lead Forms:', 'pipedrive-lead-forms' ),
+				esc_html__( 'Cloudflare rejects the Turnstile secret key, so the captcha does not protect your forms. Submissions are still accepted and flagged as suspicious. Check the secret key in the settings.', 'pipedrive-lead-forms' )
+			);
+		}
+		if ( ! $parts ) {
+			return;
+		}
+		printf(
+			'<div class="notice notice-warning"><p><strong>%1$s</strong> %2$s <a href="%3$s">%4$s</a></p></div>',
+			esc_html__( 'Pipedrive Lead Forms:', 'pipedrive-lead-forms' ),
+			/* translators: %s: comma separated list such as "2 failed, 1 held back (not sent)". */
+			esc_html( sprintf( __( 'Leads that did not reach Pipedrive: %s.', 'pipedrive-lead-forms' ), implode( ', ', $parts ) ) ),
+			esc_url( self::page_url() ),
+			esc_html__( 'Open the submission log', 'pipedrive-lead-forms' )
+		);
 	}
 
 	/**
@@ -53,6 +97,7 @@ class Pdlead_Admin_Log {
 			return;
 		}
 		wp_enqueue_style( 'pdlead-admin', PDLEAD_URL . 'assets/admin.css', array(), PDLEAD_VERSION );
+		wp_enqueue_script( 'pdlead-admin-log', PDLEAD_URL . 'assets/admin-log.js', array(), PDLEAD_VERSION, true );
 	}
 
 	/**
@@ -99,6 +144,7 @@ class Pdlead_Admin_Log {
 					'pending' => __( 'Pending', 'pipedrive-lead-forms' ),
 					'sent'    => __( 'Sent', 'pipedrive-lead-forms' ),
 					'failed'  => __( 'Failed', 'pipedrive-lead-forms' ),
+					'held'    => __( 'Held', 'pipedrive-lead-forms' ),
 					'spam'    => __( 'Spam', 'pipedrive-lead-forms' ),
 				);
 				$links = array();
@@ -170,9 +216,9 @@ class Pdlead_Admin_Log {
 									<summary><?php esc_html_e( 'View', 'pipedrive-lead-forms' ); ?></summary>
 									<dl class="pdlead-payload">
 										<?php foreach ( $payload as $key => $value ) : ?>
-											<?php if ( Pdlead_Form_CPT::TRACKING_KEY === $key ) : ?>
+											<?php if ( Pdlead_Form_CPT::COOKIES_KEY === $key ) : ?>
 												<?php if ( is_array( $value ) ) : ?>
-													<dt><?php esc_html_e( 'Tracking', 'pipedrive-lead-forms' ); ?></dt>
+													<dt><?php esc_html_e( 'Cookies', 'pipedrive-lead-forms' ); ?></dt>
 													<dd>
 														<?php foreach ( $value as $name => $item ) : ?>
 															<?php echo esc_html( $name . ': ' . ( is_scalar( $item ) ? $item : '' ) ); ?><br />
@@ -211,14 +257,23 @@ class Pdlead_Admin_Log {
 								</details>
 							</td>
 							<td>
-								<?php if ( in_array( $row['status'], array( 'failed', 'pending' ), true ) ) : ?>
+								<?php if ( in_array( $row['status'], array( 'failed', 'pending', 'held' ), true ) ) : ?>
 									<?php
 									$retry_url = wp_nonce_url(
 										admin_url( 'admin-post.php?action=pdlead_retry&id=' . (int) $row['id'] ),
 										'pdlead_retry_' . (int) $row['id']
 									);
 									?>
-									<a href="<?php echo esc_url( $retry_url ); ?>" class="button button-small"><?php esc_html_e( 'Retry', 'pipedrive-lead-forms' ); ?></a>
+									<a href="<?php echo esc_url( $retry_url ); ?>" class="button button-small"><?php echo 'held' === $row['status'] ? esc_html__( 'Send to Pipedrive', 'pipedrive-lead-forms' ) : esc_html__( 'Retry', 'pipedrive-lead-forms' ); ?></a>
+								<?php endif; ?>
+								<?php if ( in_array( $row['status'], array( 'failed', 'held' ), true ) ) : ?>
+									<?php
+									$discard_url = wp_nonce_url(
+										admin_url( 'admin-post.php?action=pdlead_discard&id=' . (int) $row['id'] ),
+										'pdlead_discard_' . (int) $row['id']
+									);
+									?>
+									<a href="<?php echo esc_url( $discard_url ); ?>" class="button button-small button-link-delete pdlead-discard" data-pdlead-confirm="<?php esc_attr_e( 'Discard this submission? It will not be sent to Pipedrive and is deleted with the regular cleanup.', 'pipedrive-lead-forms' ); ?>"><?php esc_html_e( 'Discard', 'pipedrive-lead-forms' ); ?></a>
 								<?php endif; ?>
 							</td>
 						</tr>
@@ -264,6 +319,32 @@ class Pdlead_Admin_Log {
 				)
 			);
 			Pdlead_Lead_Dispatcher::dispatch( $id );
+		}
+
+		wp_safe_redirect( self::page_url() );
+		exit;
+	}
+
+	/**
+	 * Discard a held or failed submission by marking it as spam. It is never
+	 * sent and the regular cleanup removes it with its files.
+	 */
+	public static function handle_discard() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You are not allowed to do this.', 'pipedrive-lead-forms' ) );
+		}
+		$id = isset( $_GET['id'] ) ? absint( $_GET['id'] ) : 0;
+		check_admin_referer( 'pdlead_discard_' . $id );
+
+		$row = $id ? Pdlead_Submission_Store::get( $id ) : null;
+		if ( $row && in_array( $row['status'], array( Pdlead_Submission_Store::STATUS_FAILED, Pdlead_Submission_Store::STATUS_HELD ), true ) ) {
+			Pdlead_Submission_Store::update(
+				$id,
+				array(
+					'status'     => Pdlead_Submission_Store::STATUS_SPAM,
+					'last_error' => __( 'Discarded in the submission log.', 'pipedrive-lead-forms' ),
+				)
+			);
 		}
 
 		wp_safe_redirect( self::page_url() );
