@@ -178,3 +178,13 @@
 .pdlead-cookie-help li {
 	margin: 0 0 0.25em;
 }
+
+/* Variable list of the email notification editor. */
+.pdlead-email-vars {
+	list-style: none;
+	margin: 0.5em 0 0;
+}
+
+.pdlead-email-vars li {
+	margin: 0 0 0.25em;
+}

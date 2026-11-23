@@ -36,6 +36,7 @@ require_once PDLEAD_PATH . 'includes/class-submission-store.php';
 require_once PDLEAD_PATH . 'includes/class-settings.php';
 require_once PDLEAD_PATH . 'includes/class-file-store.php';
 require_once PDLEAD_PATH . 'includes/class-form-cpt.php';
+require_once PDLEAD_PATH . 'includes/class-notifier.php';
 require_once PDLEAD_PATH . 'includes/class-form-renderer.php';
 require_once PDLEAD_PATH . 'includes/class-bot-guard.php';
 require_once PDLEAD_PATH . 'includes/class-pipedrive-client.php';

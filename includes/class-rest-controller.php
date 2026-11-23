@@ -230,6 +230,9 @@ class Pdlead_Rest_Controller {
 		// Held rows may come from a flood, so their copy carries no attachments.
 		self::backup_email( $post, $fields, $payload, false, ! $held );
 
+		// The form's own emails to us and to the visitor, when enabled.
+		Pdlead_Notifier::send( $post, $fields, $payload, $flagged );
+
 		// Send to Pipedrive right after the response, so a slow API never
 		// delays the visitor. On failure the row stays pending for retry.
 		if ( ! $held ) {

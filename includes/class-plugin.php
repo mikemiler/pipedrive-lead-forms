@@ -41,6 +41,7 @@ class Pdlead_Plugin {
 		add_action( 'admin_init', array( 'Pdlead_Submission_Store', 'maybe_upgrade' ) );
 
 		Pdlead_Form_CPT::init();
+		Pdlead_Notifier::init();
 		Pdlead_Form_Renderer::init();
 		Pdlead_Rest_Controller::init();
 		Pdlead_Lead_Dispatcher::init();
