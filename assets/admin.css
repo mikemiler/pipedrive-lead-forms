@@ -188,3 +188,104 @@
 .pdlead-email-vars li {
 	margin: 0 0 0.25em;
 }
+
+/* Active outputs in the form list. */
+.pdlead-badge-output {
+	background: #dbe9f6;
+	color: #1d4f7c;
+	margin: 0 2px 2px 0;
+}
+
+/* Custom endpoint editor and log. */
+.pdlead-webhook-hidden {
+	display: none;
+}
+
+.pdlead-webhook-result {
+	margin-top: 0.75em;
+}
+
+.pdlead-webhook-request {
+	font-family: Consolas, Monaco, monospace;
+	word-break: break-all;
+}
+
+.pdlead-webhook-ok {
+	color: #1a7f37;
+	font-weight: 600;
+}
+
+.pdlead-code {
+	max-height: 400px;
+	overflow: auto;
+	padding: 8px 10px;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.pdlead-webhook-log h4 {
+	margin: 1em 0 0.25em;
+}
+
+/* Design choice: radio cards with a preview image (settings and form editor). */
+.pdlead-designs {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(200px, 240px));
+	gap: 12px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.pdlead-design-choice {
+	display: block;
+	padding: 8px;
+	border: 2px solid #dcdcde;
+	border-radius: 6px;
+	background: #fff;
+	cursor: pointer;
+}
+
+.pdlead-design-choice:hover {
+	border-color: #8c8f94;
+}
+
+.pdlead-design-choice:has(input:checked) {
+	border-color: #2271b1;
+	box-shadow: 0 0 0 1px #2271b1;
+}
+
+.pdlead-design-choice:has(input:focus-visible) {
+	outline: 2px solid #2271b1;
+	outline-offset: 2px;
+}
+
+.pdlead-design-choice img {
+	display: block;
+	width: 100%;
+	height: auto;
+	aspect-ratio: 4 / 3;
+	object-fit: cover;
+	object-position: top;
+	border: 1px solid #f0f0f1;
+	border-radius: 3px;
+}
+
+.pdlead-design-name {
+	display: block;
+	margin-top: 8px;
+	font-weight: 600;
+}
+
+.pdlead-design-note {
+	display: block;
+	margin: 2px 0 0 24px;
+	color: #646970;
+}
+
+/* The form editor side box is narrow: one card per row. */
+#pdlead_design_box .pdlead-designs {
+	grid-template-columns: 1fr;
+}

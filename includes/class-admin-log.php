@@ -32,7 +32,7 @@ class Pdlead_Admin_Log {
 	}
 
 	/**
-	 * Tell administrators about leads that did not reach Pipedrive, on every
+	 * Tell administrators about submissions that were not delivered, on every
 	 * admin screen, so a problem is noticed even when no email arrives.
 	 */
 	public static function attention_notice() {
@@ -67,7 +67,7 @@ class Pdlead_Admin_Log {
 			'<div class="notice notice-warning"><p><strong>%1$s</strong> %2$s <a href="%3$s">%4$s</a></p></div>',
 			esc_html__( 'Pipedrive Lead Forms:', 'pipedrive-lead-forms' ),
 			/* translators: %s: comma separated list such as "2 failed, 1 held back (not sent)". */
-			esc_html( sprintf( __( 'Leads that did not reach Pipedrive: %s.', 'pipedrive-lead-forms' ), implode( ', ', $parts ) ) ),
+			esc_html( sprintf( __( 'Submissions that were not delivered: %s.', 'pipedrive-lead-forms' ), implode( ', ', $parts ) ) ),
 			esc_url( self::page_url() ),
 			esc_html__( 'Open the submission log', 'pipedrive-lead-forms' )
 		);
@@ -175,7 +175,7 @@ class Pdlead_Admin_Log {
 						<th><?php esc_html_e( 'Date', 'pipedrive-lead-forms' ); ?></th>
 						<th><?php esc_html_e( 'Form', 'pipedrive-lead-forms' ); ?></th>
 						<th><?php esc_html_e( 'Status', 'pipedrive-lead-forms' ); ?></th>
-						<th><?php esc_html_e( 'Lead', 'pipedrive-lead-forms' ); ?></th>
+						<th><?php esc_html_e( 'Delivery', 'pipedrive-lead-forms' ); ?></th>
 						<th><?php esc_html_e( 'Data', 'pipedrive-lead-forms' ); ?></th>
 						<th><?php esc_html_e( 'Actions', 'pipedrive-lead-forms' ); ?></th>
 					</tr>
@@ -201,15 +201,11 @@ class Pdlead_Admin_Log {
 									<span class="pdlead-badge pdlead-badge-flagged"><?php esc_html_e( 'suspicious', 'pipedrive-lead-forms' ); ?></span>
 								<?php endif; ?>
 								<?php if ( ! empty( $row['last_error'] ) ) : ?>
-									<br /><small class="pdlead-error"><?php echo esc_html( $row['last_error'] ); ?></small>
+									<br /><small class="pdlead-error"><?php echo nl2br( esc_html( $row['last_error'] ) ); ?></small>
 								<?php endif; ?>
 							</td>
 							<td>
-								<?php if ( ! empty( $row['pipedrive_lead_id'] ) ) : ?>
-									<code><?php echo esc_html( $row['pipedrive_lead_id'] ); ?></code>
-								<?php else : ?>
-									<span aria-hidden="true">-</span>
-								<?php endif; ?>
+								<?php self::render_delivery( $row ); ?>
 							</td>
 							<td>
 								<details>
@@ -254,6 +250,7 @@ class Pdlead_Admin_Log {
 												</dd>
 										<?php endforeach; ?>
 									</dl>
+									<?php self::render_webhook_log( $row ); ?>
 								</details>
 							</td>
 							<td>
@@ -264,7 +261,7 @@ class Pdlead_Admin_Log {
 										'pdlead_retry_' . (int) $row['id']
 									);
 									?>
-									<a href="<?php echo esc_url( $retry_url ); ?>" class="button button-small"><?php echo 'held' === $row['status'] ? esc_html__( 'Send to Pipedrive', 'pipedrive-lead-forms' ) : esc_html__( 'Retry', 'pipedrive-lead-forms' ); ?></a>
+									<a href="<?php echo esc_url( $retry_url ); ?>" class="button button-small"><?php echo 'held' === $row['status'] ? esc_html__( 'Send', 'pipedrive-lead-forms' ) : esc_html__( 'Retry', 'pipedrive-lead-forms' ); ?></a>
 								<?php endif; ?>
 								<?php if ( in_array( $row['status'], array( 'failed', 'held' ), true ) ) : ?>
 									<?php
@@ -273,7 +270,7 @@ class Pdlead_Admin_Log {
 										'pdlead_discard_' . (int) $row['id']
 									);
 									?>
-									<a href="<?php echo esc_url( $discard_url ); ?>" class="button button-small button-link-delete pdlead-discard" data-pdlead-confirm="<?php esc_attr_e( 'Discard this submission? It will not be sent to Pipedrive and is deleted with the regular cleanup.', 'pipedrive-lead-forms' ); ?>"><?php esc_html_e( 'Discard', 'pipedrive-lead-forms' ); ?></a>
+									<a href="<?php echo esc_url( $discard_url ); ?>" class="button button-small button-link-delete pdlead-discard" data-pdlead-confirm="<?php esc_attr_e( 'Discard this submission? It will not be delivered and is deleted with the regular cleanup.', 'pipedrive-lead-forms' ); ?>"><?php esc_html_e( 'Discard', 'pipedrive-lead-forms' ); ?></a>
 								<?php endif; ?>
 							</td>
 						</tr>
@@ -297,6 +294,93 @@ class Pdlead_Admin_Log {
 			<?php endif; ?>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Render the delivery state of a row: Pipedrive lead ID and the HTTP status
+	 * of the last custom endpoint attempt.
+	 *
+	 * @param array $row Submission row.
+	 */
+	private static function render_delivery( $row ) {
+		$parts = array();
+		if ( ! empty( $row['pipedrive_lead_id'] ) ) {
+			$parts[] = esc_html__( 'Pipedrive', 'pipedrive-lead-forms' ) . ' <code>' . esc_html( $row['pipedrive_lead_id'] ) . '</code>';
+		}
+		if ( ! empty( $row['webhook_status'] ) ) {
+			$log  = self::webhook_log( $row );
+			$code = ! empty( $log['status_code'] ) ? (string) (int) $log['status_code'] : __( 'error', 'pipedrive-lead-forms' );
+			$css  = 'sent' === $row['webhook_status'] ? 'sent' : 'failed';
+			/* translators: %s: HTTP status code of the endpoint, or "error". */
+			$parts[] = '<span class="pdlead-badge pdlead-badge-' . esc_attr( $css ) . '">' . esc_html( sprintf( __( 'Endpoint %s', 'pipedrive-lead-forms' ), $code ) ) . '</span>';
+		}
+		if ( ! $parts ) {
+			echo '<span aria-hidden="true">-</span>';
+			return;
+		}
+		echo implode( '<br />', $parts ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- each part is escaped above.
+	}
+
+	/**
+	 * Decoded log of the last custom endpoint attempt of a row.
+	 *
+	 * @param array $row Submission row.
+	 * @return array
+	 */
+	private static function webhook_log( $row ) {
+		$log = empty( $row['webhook_log'] ) ? null : json_decode( $row['webhook_log'], true );
+		return is_array( $log ) ? $log : array();
+	}
+
+	/**
+	 * Render what was sent to the custom endpoint and what it answered.
+	 *
+	 * @param array $row Submission row.
+	 */
+	private static function render_webhook_log( $row ) {
+		$log = self::webhook_log( $row );
+		if ( ! $log ) {
+			return;
+		}
+		$request = isset( $log['request_body'] ) ? (string) $log['request_body'] : '';
+		$answer  = isset( $log['response_body'] ) ? (string) $log['response_body'] : '';
+		echo '<div class="pdlead-webhook-log">';
+		echo '<h4>' . esc_html__( 'Custom endpoint, last attempt', 'pipedrive-lead-forms' ) . '</h4>';
+		echo '<p><code>' . esc_html( ( isset( $log['method'] ) ? $log['method'] : '' ) . ' ' . ( isset( $log['url'] ) ? $log['url'] : '' ) ) . '</code><br />';
+		echo esc_html(
+			sprintf(
+				/* translators: 1: date and time, 2: HTTP status code, 3: duration in milliseconds. */
+				__( '%1$s, HTTP %2$s, %3$d ms', 'pipedrive-lead-forms' ),
+				isset( $log['at'] ) ? get_date_from_gmt( gmdate( 'Y-m-d H:i:s', (int) strtotime( $log['at'] ) ), 'Y-m-d H:i:s' ) : '',
+				! empty( $log['status_code'] ) ? (int) $log['status_code'] : '-',
+				isset( $log['duration_ms'] ) ? (int) $log['duration_ms'] : 0
+			)
+		);
+		echo '</p>';
+		if ( ! empty( $log['error'] ) ) {
+			echo '<p class="pdlead-error">' . esc_html( $log['error'] ) . '</p>';
+		}
+		if ( '' !== $request ) {
+			echo '<p><strong>' . esc_html__( 'Sent', 'pipedrive-lead-forms' ) . '</strong></p>';
+			echo '<pre class="pdlead-code">' . esc_html( self::pretty_json( $request ) ) . '</pre>';
+		}
+		echo '<p><strong>' . esc_html__( 'Response', 'pipedrive-lead-forms' ) . '</strong></p>';
+		echo '<pre class="pdlead-code">' . esc_html( '' !== $answer ? self::pretty_json( $answer ) : __( '(empty)', 'pipedrive-lead-forms' ) ) . '</pre>';
+		echo '</div>';
+	}
+
+	/**
+	 * Pretty print a JSON text; any other text is returned unchanged.
+	 *
+	 * @param string $text Text.
+	 * @return string
+	 */
+	private static function pretty_json( $text ) {
+		$data = json_decode( $text );
+		if ( JSON_ERROR_NONE !== json_last_error() || ! ( is_array( $data ) || is_object( $data ) ) ) {
+			return $text;
+		}
+		return (string) wp_json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 	}
 
 	/**
@@ -342,7 +426,7 @@ class Pdlead_Admin_Log {
 				$id,
 				array(
 					'status'     => Pdlead_Submission_Store::STATUS_SPAM,
-					'last_error' => __( 'Discarded in the submission log.', 'pipedrive-lead-forms' ),
+					'last_error' => Pdlead_Submission_Store::append_message( $row['last_error'], __( 'Discarded in the submission log.', 'pipedrive-lead-forms' ) ),
 				)
 			);
 		}

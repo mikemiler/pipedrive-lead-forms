@@ -22,6 +22,11 @@ class Pdlead_Form_Renderer {
 	const HONEYPOT = 'pdlead_website';
 
 	/**
+	 * Uploads subdirectory holding the generated custom CSS file.
+	 */
+	const CSS_SUBDIR = 'pipedrive-lead-forms-css';
+
+	/**
 	 * Whether assets have been registered this request.
 	 *
 	 * @var bool
@@ -115,6 +120,69 @@ class Pdlead_Form_Renderer {
 	}
 
 	/**
+	 * Selectable form designs. "standard" is the base stylesheet, which leaves
+	 * colors and fonts to the theme; every other design adds its own
+	 * stylesheet assets/designs/<key>.css on top, scoped to its form class.
+	 *
+	 * @return array<string,string> Labels keyed by design key.
+	 */
+	public static function designs() {
+		return array(
+			'standard' => __( 'Standard (theme styles)', 'pipedrive-lead-forms' ),
+			'outline'  => __( 'Outline with floating labels', 'pipedrive-lead-forms' ),
+		);
+	}
+
+	/**
+	 * Design of a form: its own choice, else the default from the settings.
+	 *
+	 * @param int $form_id Form post ID.
+	 * @return string Design key.
+	 */
+	public static function form_design( $form_id ) {
+		$designs = self::designs();
+		$design  = Pdlead_Form_CPT::get_design( $form_id );
+		if ( ! isset( $designs[ $design ] ) ) {
+			$design = (string) Pdlead_Settings::get( 'form_design' );
+		}
+		return isset( $designs[ $design ] ) ? $design : 'standard';
+	}
+
+	/**
+	 * URL of the custom CSS from the settings. It is written to a file in the
+	 * uploads folder, so it loads like any stylesheet instead of inline. The
+	 * file name carries a hash of the content: a change gets a new URL, so no
+	 * browser cache keeps serving the old rules. Older files are kept, because
+	 * pages in a page cache still link them until the cache is cleared.
+	 *
+	 * @return string URL, or '' when there is no custom CSS or it cannot be written.
+	 */
+	private static function custom_css_url() {
+		$css = trim( (string) Pdlead_Settings::get( 'custom_css' ) );
+		if ( '' === $css ) {
+			return '';
+		}
+		$uploads = wp_upload_dir( null, false );
+		if ( ! empty( $uploads['error'] ) ) {
+			return '';
+		}
+
+		$name = 'custom-' . substr( md5( $css ), 0, 12 ) . '.css';
+		$dir  = trailingslashit( $uploads['basedir'] ) . self::CSS_SUBDIR;
+		$file = $dir . '/' . $name;
+		if ( ! file_exists( $file ) ) {
+			if ( ! wp_mkdir_p( $dir ) ) {
+				return '';
+			}
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- plain write of a generated file, WP_Filesystem may need credentials on the front end.
+			if ( false === file_put_contents( $file, $css ) ) {
+				return '';
+			}
+		}
+		return set_url_scheme( trailingslashit( $uploads['baseurl'] ) . self::CSS_SUBDIR . '/' . $name );
+	}
+
+	/**
 	 * Register (but do not enqueue) front-end assets.
 	 */
 	public static function register_assets() {
@@ -168,7 +236,19 @@ class Pdlead_Form_Renderer {
 			return '';
 		}
 
+		$design = self::form_design( $form_id );
+		$style  = 'pdlead-form';
 		wp_enqueue_style( 'pdlead-form' );
+		if ( 'standard' !== $design ) {
+			$style = 'pdlead-design-' . $design;
+			wp_enqueue_style( $style, PDLEAD_URL . 'assets/designs/' . $design . '.css', array( 'pdlead-form' ), PDLEAD_VERSION );
+		}
+		// The custom CSS fine tunes every design, so it loads after it.
+		$custom_css = self::custom_css_url();
+		if ( '' !== $custom_css ) {
+			// phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion -- the file name carries a content hash.
+			wp_enqueue_style( 'pdlead-custom', $custom_css, array( $style ), null );
+		}
 		wp_enqueue_script( 'pdlead-form' );
 
 		if ( Pdlead_Settings::turnstile_active() ) {
@@ -176,17 +256,18 @@ class Pdlead_Form_Renderer {
 			wp_enqueue_script( 'pdlead-turnstile', 'https://challenges.cloudflare.com/turnstile/v0/api.js', array(), null, true );
 		}
 
-		return self::render( $form_id, $fields );
+		return self::render( $form_id, $fields, $design );
 	}
 
 	/**
 	 * Build the form markup.
 	 *
-	 * @param int   $form_id Form post ID.
-	 * @param array $fields  Field definitions.
+	 * @param int    $form_id Form post ID.
+	 * @param array  $fields  Field definitions.
+	 * @param string $design  Design key.
 	 * @return string
 	 */
-	private static function render( $form_id, $fields ) {
+	private static function render( $form_id, $fields, $design ) {
 		$turnstile_enabled = Pdlead_Settings::turnstile_active();
 
 		// Form specific texts handled on the client: the error text is the fallback
@@ -208,9 +289,9 @@ class Pdlead_Form_Renderer {
 		// run; the script always handles the submit itself.
 		ob_start();
 		?>
-		<form class="pdlead-form" method="post" data-pdlead-form="<?php echo esc_attr( $form_id ); ?>" data-pdlead-error="<?php echo esc_attr( $error_message ); ?>" data-pdlead-sending="<?php echo esc_attr( $sending_message ); ?>" data-pdlead-max-bytes="<?php echo esc_attr( $max_bytes ); ?>" data-pdlead-max-files="<?php echo esc_attr( $max_files ); ?>" data-pdlead-max-total="<?php echo esc_attr( $max_total ); ?>" novalidate>
+		<form class="pdlead-form pdlead-design-<?php echo esc_attr( $design ); ?>" method="post" data-pdlead-form="<?php echo esc_attr( $form_id ); ?>" data-pdlead-error="<?php echo esc_attr( $error_message ); ?>" data-pdlead-sending="<?php echo esc_attr( $sending_message ); ?>" data-pdlead-max-bytes="<?php echo esc_attr( $max_bytes ); ?>" data-pdlead-max-files="<?php echo esc_attr( $max_files ); ?>" data-pdlead-max-total="<?php echo esc_attr( $max_total ); ?>" novalidate>
 			<?php foreach ( $fields as $field ) : ?>
-				<?php echo self::render_field( $field, $id_prefix ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+				<?php echo self::render_field( $field, $id_prefix, $design ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 			<?php endforeach; ?>
 
 			<?php // Honeypot: hidden from humans, assistive tech and keyboard nav. ?>
@@ -243,9 +324,10 @@ class Pdlead_Form_Renderer {
 	 *
 	 * @param array  $field     Field definition.
 	 * @param string $id_prefix Element ID prefix unique to this form instance.
+	 * @param string $design    Design key.
 	 * @return string
 	 */
-	private static function render_field( $field, $id_prefix ) {
+	private static function render_field( $field, $id_prefix, $design ) {
 		$key      = isset( $field['key'] ) ? $field['key'] : '';
 		$label    = isset( $field['label'] ) ? $field['label'] : '';
 		$type     = isset( $field['type'] ) ? $field['type'] : 'text';
@@ -256,6 +338,9 @@ class Pdlead_Form_Renderer {
 		$auto     = isset( self::AUTOCOMPLETE[ $map ] ) ? ' autocomplete="' . self::AUTOCOMPLETE[ $map ] . '"' : '';
 		$req_attr = $required ? ' required' : '';
 		$req_mark = $required ? ' <span class="pdlead-req" aria-hidden="true">*</span>' : '';
+		// The outline design shows the placeholder instead of the label until a
+		// value is entered, so the placeholder carries the required mark there.
+		$placeholder = $label . ( $required && 'outline' === $design ? '*' : '' );
 
 		// Hidden and cookie values are added on the server at submission, so
 		// nothing is rendered: visitors can neither see nor change them.
@@ -270,7 +355,7 @@ class Pdlead_Form_Renderer {
 				?>
 				<p class="pdlead-row">
 					<label for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $label ) . $req_mark; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></label>
-					<textarea id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" rows="5" maxlength="<?php echo esc_attr( Pdlead_Rest_Controller::TEXTAREA_MAX_LENGTH ); ?>" placeholder="<?php echo esc_attr( $label ); ?>"<?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>></textarea>
+					<textarea id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" rows="5" maxlength="<?php echo esc_attr( Pdlead_Rest_Controller::TEXTAREA_MAX_LENGTH ); ?>" placeholder="<?php echo esc_attr( $placeholder ); ?>"<?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>></textarea>
 				</p>
 				<?php
 				break;
@@ -305,9 +390,14 @@ class Pdlead_Form_Renderer {
 
 			case 'file':
 				$accept = self::accept_attr();
+				/* translators: %s: maximum file size, e.g. "10 MB". */
+				$hint = sprintf( __( 'Max. %s per file', 'pipedrive-lead-forms' ), size_format( Pdlead_Settings::max_file_size_bytes() ) );
+				if ( ! $required ) {
+					$hint .= ' ' . __( '(optional)', 'pipedrive-lead-forms' );
+				}
 				?>
 				<p class="pdlead-row">
-					<label for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $label ) . $req_mark; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></label>
+					<label for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $label ) . $req_mark; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?> <span class="pdlead-file-hint"><?php echo esc_html( $hint ); ?></span></label>
 					<input type="file" id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>[]" multiple<?php echo $accept; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?><?php echo $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?> />
 				</p>
 				<?php
@@ -318,7 +408,7 @@ class Pdlead_Form_Renderer {
 				?>
 				<p class="pdlead-row">
 					<label for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $label ) . $req_mark; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></label>
-					<input type="<?php echo esc_attr( $input_type ); ?>" id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" maxlength="<?php echo esc_attr( Pdlead_Rest_Controller::TEXT_MAX_LENGTH ); ?>" placeholder="<?php echo esc_attr( $label ); ?>"<?php echo $auto . $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- fixed attribute strings. ?> />
+					<input type="<?php echo esc_attr( $input_type ); ?>" id="<?php echo esc_attr( $id ); ?>" name="<?php echo esc_attr( $name ); ?>" maxlength="<?php echo esc_attr( Pdlead_Rest_Controller::TEXT_MAX_LENGTH ); ?>" placeholder="<?php echo esc_attr( $placeholder ); ?>"<?php echo $auto . $req_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- fixed attribute strings. ?> />
 				</p>
 				<?php
 				break;

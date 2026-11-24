@@ -1,0 +1,331 @@
+/*
+ * Outline design: rounded outlined fields whose label floats onto the border
+ * once a value is entered, square checkboxes, a framed upload box and a pill
+ * shaped button. Loaded on top of form.css. Colors, sizes and radius come
+ * from the variables below, so the additional CSS in the settings can adjust
+ * them. Fonts are inherited from the theme.
+ */
+
+.pdlead-design-outline {
+	--pdlead-ink: #184e51;
+	--pdlead-border: rgba(24, 78, 81, 0.25);
+	/* Background behind the floating label: set it to the page background. */
+	--pdlead-surface: #f5f5f5;
+	--pdlead-field: transparent;
+	--pdlead-accent: #35ed54;
+	--pdlead-accent-hover: #2bd649;
+	--pdlead-success: #d3ffdf;
+	--pdlead-error: #fc264c;
+	--pdlead-radius: 12px;
+	--pdlead-gap: 21px;
+	--pdlead-font-size: 18px;
+	color: var(--pdlead-ink);
+	font-size: 16px;
+	line-height: 1.15;
+}
+
+.pdlead-design-outline .pdlead-row {
+	position: relative;
+	margin: 0 0 var(--pdlead-gap);
+}
+
+/* Text fields, selects and textareas. */
+
+.pdlead-design-outline .pdlead-row input[type="text"],
+.pdlead-design-outline .pdlead-row input[type="email"],
+.pdlead-design-outline .pdlead-row input[type="tel"],
+.pdlead-design-outline .pdlead-row textarea,
+.pdlead-design-outline .pdlead-row select {
+	display: block;
+	width: 100%;
+	margin: 0;
+	padding: 15px 26px;
+	border: 1px solid var(--pdlead-border);
+	border-radius: var(--pdlead-radius);
+	background-color: var(--pdlead-field);
+	box-shadow: none;
+	color: var(--pdlead-ink);
+	font-family: inherit;
+	font-size: var(--pdlead-font-size);
+	font-weight: 400;
+	line-height: 22px;
+	outline: none;
+	transition: border-color 0.15s ease;
+}
+
+.pdlead-design-outline .pdlead-row textarea {
+	height: 180px;
+	resize: vertical;
+}
+
+.pdlead-design-outline .pdlead-row select {
+	appearance: none;
+	padding-right: 56px;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23184e51' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+	background-position: right 24px center;
+	background-repeat: no-repeat;
+	background-size: 18px;
+	cursor: pointer;
+}
+
+.pdlead-design-outline .pdlead-row input::placeholder,
+.pdlead-design-outline .pdlead-row textarea::placeholder {
+	color: var(--pdlead-ink);
+	opacity: 1;
+}
+
+.pdlead-design-outline .pdlead-row input:focus,
+.pdlead-design-outline .pdlead-row textarea:focus,
+.pdlead-design-outline .pdlead-row select:focus {
+	border-color: var(--pdlead-ink);
+}
+
+.pdlead-design-outline .pdlead-row [aria-invalid="true"] {
+	border-color: var(--pdlead-error);
+	box-shadow: none;
+	outline: none;
+}
+
+/*
+ * Floating label. The placeholder shows the label until a value is entered,
+ * then the label sits on the top border. Selects have no placeholder, so
+ * their label always floats. The label stays in the DOM for screen readers.
+ * Browsers without :has() show the label above the field instead.
+ */
+.pdlead-design-outline .pdlead-row:has(> input[type="text"], > input[type="email"], > input[type="tel"], > textarea, > select) > label {
+	position: absolute;
+	top: 0;
+	left: 20px;
+	z-index: 1;
+	margin: 0;
+	padding: 0 6px;
+	background: var(--pdlead-surface);
+	color: var(--pdlead-ink);
+	font-size: 12px;
+	font-weight: 400;
+	line-height: 14px;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateY(-50%);
+	transition: opacity 0.15s ease;
+}
+
+.pdlead-design-outline .pdlead-row:has(> input:not(:placeholder-shown), > textarea:not(:placeholder-shown), > select) > label {
+	opacity: 1;
+}
+
+.pdlead-design-outline .pdlead-req {
+	color: inherit;
+}
+
+/* Checkboxes. Absolute positioning instead of flex, so links and bold text
+   inside the consent text stay inline. */
+
+.pdlead-design-outline .pdlead-row-check label {
+	position: relative;
+	display: block;
+	min-height: 32px;
+	margin: 0;
+	padding-left: 50px;
+	font-size: 14px;
+	font-weight: 300;
+	line-height: 1.2;
+	cursor: pointer;
+}
+
+.pdlead-design-outline .pdlead-row-check input[type="checkbox"] {
+	position: absolute;
+	top: 50%;
+	left: 0;
+	width: 32px;
+	height: 32px;
+	margin: 0;
+	border: 1px solid var(--pdlead-border);
+	border-radius: 6px;
+	background: transparent center / 16px no-repeat;
+	appearance: none;
+	cursor: pointer;
+	transform: translateY(-50%);
+}
+
+.pdlead-design-outline .pdlead-row-check input[type="checkbox"]:checked {
+	background-color: var(--pdlead-accent);
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23184e51' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+}
+
+.pdlead-design-outline .pdlead-row-check input[type="checkbox"]:focus-visible {
+	outline: 2px solid var(--pdlead-ink);
+	outline-offset: 2px;
+}
+
+.pdlead-design-outline .pdlead-row-check input[aria-invalid="true"] {
+	border-color: var(--pdlead-error);
+	box-shadow: none;
+	outline: none;
+}
+
+.pdlead-design-outline .pdlead-row-check a {
+	color: inherit;
+	font-weight: 400;
+	text-decoration: underline;
+}
+
+/* The required attribute already marks consent checkboxes for screen readers. */
+.pdlead-design-outline .pdlead-row-check .pdlead-req {
+	display: none;
+}
+
+/* File upload: a framed box with the label as its heading. */
+
+.pdlead-design-outline .pdlead-row:has(> input[type="file"]) {
+	margin-bottom: 33px;
+	padding: 25px 26px;
+	border: 1px solid var(--pdlead-border);
+	border-radius: var(--pdlead-radius);
+}
+
+.pdlead-design-outline .pdlead-row:has(> input[type="file"]) > label {
+	margin: 0 0 21px;
+	font-size: var(--pdlead-font-size);
+	font-weight: 500;
+	line-height: 22px;
+}
+
+.pdlead-design-outline .pdlead-file-hint {
+	margin-left: 9px;
+	font-size: 12px;
+	font-weight: 400;
+	text-transform: uppercase;
+}
+
+.pdlead-design-outline .pdlead-row input[type="file"] {
+	max-width: 100%;
+	color: var(--pdlead-ink);
+	font-family: inherit;
+	font-size: 14px;
+}
+
+.pdlead-design-outline .pdlead-row input[type="file"]::file-selector-button {
+	min-width: 260px;
+	margin-right: 16px;
+	padding: 24px 56px 24px 21px;
+	border: 1px solid var(--pdlead-border);
+	border-radius: var(--pdlead-radius);
+	background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23184e51' stroke-width='1.5' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 8v8M8 12h8'/%3E%3C/svg%3E") right 21px center / 24px no-repeat;
+	color: var(--pdlead-ink);
+	font-family: inherit;
+	font-size: var(--pdlead-font-size);
+	font-weight: 500;
+	line-height: 22px;
+	text-align: left;
+	cursor: pointer;
+	transition: border-color 0.15s ease;
+}
+
+.pdlead-design-outline .pdlead-row input[type="file"]::file-selector-button:hover {
+	border-color: var(--pdlead-ink);
+}
+
+.pdlead-design-outline .pdlead-row input[type="file"][aria-invalid="true"]::file-selector-button {
+	border-color: var(--pdlead-error);
+}
+
+.pdlead-design-outline .cf-turnstile {
+	margin: 0 0 var(--pdlead-gap);
+}
+
+/* Submit: pill shaped with an envelope icon. */
+
+.pdlead-design-outline .pdlead-submit {
+	display: inline-flex;
+	align-items: center;
+	gap: 12px;
+	margin-top: 12px;
+	padding: 22px 48px 22px 69px;
+	border: 0;
+	border-radius: 68px;
+	background: var(--pdlead-accent);
+	box-shadow: none;
+	color: var(--pdlead-ink);
+	font-family: inherit;
+	font-size: 24px;
+	font-weight: 500;
+	line-height: 24px;
+	text-transform: none;
+	transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.pdlead-design-outline .pdlead-submit::after {
+	content: "";
+	width: 24px;
+	height: 24px;
+	background: currentColor;
+	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Cpath d='M3.5 6.5l8.5 6.5 8.5-6.5'/%3E%3C/svg%3E") center / contain no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Cpath d='M3.5 6.5l8.5 6.5 8.5-6.5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.pdlead-design-outline .pdlead-submit:hover:not(:disabled) {
+	background: var(--pdlead-accent-hover);
+}
+
+.pdlead-design-outline .pdlead-submit:focus-visible {
+	outline: 2px solid var(--pdlead-ink);
+	outline-offset: 2px;
+}
+
+.pdlead-design-outline .pdlead-submit:disabled {
+	opacity: 0.5;
+}
+
+/* Success and error message: filled boxes below the button. */
+
+.pdlead-design-outline .pdlead-status:not(:empty) {
+	margin: 16px 0;
+	padding: 24px;
+	border-radius: 6px;
+	font-size: 16px;
+	line-height: 1.15;
+}
+
+.pdlead-design-outline .pdlead-status-success {
+	background: var(--pdlead-success);
+	color: var(--pdlead-ink);
+}
+
+.pdlead-design-outline .pdlead-status-error {
+	background: var(--pdlead-error);
+	color: #fff;
+}
+
+.pdlead-design-outline .pdlead-status a {
+	color: inherit;
+	text-decoration: underline;
+}
+
+/* Smaller screens: less padding, a full width button. */
+@media (max-width: 600px) {
+	.pdlead-design-outline .pdlead-row input[type="text"],
+	.pdlead-design-outline .pdlead-row input[type="email"],
+	.pdlead-design-outline .pdlead-row input[type="tel"],
+	.pdlead-design-outline .pdlead-row textarea,
+	.pdlead-design-outline .pdlead-row select {
+		padding-right: 18px;
+		padding-left: 18px;
+	}
+
+	.pdlead-design-outline .pdlead-row select {
+		padding-right: 48px;
+		background-position: right 18px center;
+	}
+
+	.pdlead-design-outline .pdlead-row input[type="file"]::file-selector-button {
+		min-width: 0;
+	}
+
+	.pdlead-design-outline .pdlead-submit {
+		justify-content: center;
+		width: 100%;
+		padding-right: 24px;
+		padding-left: 24px;
+	}
+}

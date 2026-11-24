@@ -70,6 +70,8 @@ class Pdlead_Settings {
 			'file_max_size_mb'        => 10,
 			'file_allowed_ext'        => '',
 			'cookie_names'            => implode( ', ', self::DEFAULT_COOKIE_NAMES ),
+			'form_design'             => 'standard',
+			'custom_css'              => '',
 		);
 	}
 

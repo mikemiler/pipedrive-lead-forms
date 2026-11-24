@@ -61,6 +61,8 @@ class Pdlead_Submission_Store {
 			pipedrive_org_id BIGINT UNSIGNED NULL,
 			pipedrive_person_id BIGINT UNSIGNED NULL,
 			pipedrive_lead_id VARCHAR(64) NULL,
+			webhook_status VARCHAR(20) NULL,
+			webhook_log LONGTEXT NULL,
 			PRIMARY KEY  (id),
 			KEY status (status),
 			KEY form_id (form_id),
@@ -133,6 +135,26 @@ class Pdlead_Submission_Store {
 	}
 
 	/**
+	 * Lines of the message history kept in last_error.
+	 */
+	const MESSAGE_HISTORY = 30;
+
+	/**
+	 * Add a message to the history in last_error. Every delivery attempt
+	 * appends its errors and warnings instead of replacing the earlier ones,
+	 * so the log shows what happened on each try.
+	 *
+	 * @param string $history Current last_error value.
+	 * @param string $message Message to add.
+	 * @return string New last_error value.
+	 */
+	public static function append_message( $history, $message ) {
+		$lines   = preg_split( '/\R/', trim( (string) $history ), -1, PREG_SPLIT_NO_EMPTY );
+		$lines[] = '[' . current_time( 'Y-m-d H:i' ) . '] ' . $message;
+		return implode( "\n", array_slice( $lines, -self::MESSAGE_HISTORY ) );
+	}
+
+	/**
 	 * Update arbitrary columns on a submission row.
 	 *
 	 * @param int   $id     Row ID.
@@ -153,6 +175,8 @@ class Pdlead_Submission_Store {
 			'pipedrive_org_id'    => '%d',
 			'pipedrive_person_id' => '%d',
 			'pipedrive_lead_id'   => '%s',
+			'webhook_status'      => '%s',
+			'webhook_log'         => '%s',
 		);
 
 		foreach ( $fields as $key => $value ) {
@@ -301,6 +325,30 @@ class Pdlead_Submission_Store {
 			'rows'  => $rows ? $rows : array(),
 			'total' => $total,
 		);
+	}
+
+	/**
+	 * The latest submissions of a form, spam excluded. Used as preview data
+	 * for the custom endpoint.
+	 *
+	 * @param int $form_id Form post ID.
+	 * @param int $limit   Maximum number of rows.
+	 * @return array[] Rows ( id, created_at, status, payload ), newest first.
+	 */
+	public static function recent_for_form( $form_id, $limit ) {
+		global $wpdb;
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery -- table() is a constant table name; all values are prepared. Admin only listing, no caching.
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT id, created_at, status, payload FROM ' . self::table() . ' WHERE form_id = %d AND status <> %s ORDER BY id DESC LIMIT %d',
+				$form_id,
+				self::STATUS_SPAM,
+				$limit
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+		return $rows ? $rows : array();
 	}
 
 	/**

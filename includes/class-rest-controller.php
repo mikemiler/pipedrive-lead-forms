@@ -37,6 +37,13 @@ class Pdlead_Rest_Controller {
 	private static $deferred = array();
 
 	/**
+	 * Form emails to send at the end of this request, as Pdlead_Notifier::send() arguments.
+	 *
+	 * @var array[]
+	 */
+	private static $deferred_mails = array();
+
+	/**
 	 * Maximum number of cookie entries, guards against a runaway filter.
 	 */
 	const COOKIE_MAX_ENTRIES = 20;
@@ -214,7 +221,7 @@ class Pdlead_Rest_Controller {
 		if ( $id && $held ) {
 			Pdlead_Submission_Store::update(
 				$id,
-				array( 'last_error' => __( 'Held back: too many submissions from this IP address in a short time. Not sent to Pipedrive. Check it and use "Send to Pipedrive" to release it.', 'pipedrive-lead-forms' ) )
+				array( 'last_error' => Pdlead_Submission_Store::append_message( '', __( 'Held back: too many submissions from this IP address in a short time. Not delivered. Check it and use "Send" to release it.', 'pipedrive-lead-forms' ) ) )
 			);
 		}
 
@@ -230,40 +237,40 @@ class Pdlead_Rest_Controller {
 		// Held rows may come from a flood, so their copy carries no attachments.
 		self::backup_email( $post, $fields, $payload, false, ! $held );
 
-		// The form's own emails to us and to the visitor, when enabled.
-		Pdlead_Notifier::send( $post, $fields, $payload, $flagged );
-
-		// Send to Pipedrive right after the response, so a slow API never
-		// delays the visitor. On failure the row stays pending for retry.
+		// The form's own emails and the delivery to Pipedrive and the custom
+		// endpoint run right after the response, so a slow mail server or API
+		// never delays the visitor. On failure the row stays pending for
+		// retry. A held row may come from a flood: it gets the backup copy only.
 		if ( ! $held ) {
-			self::defer_dispatch( $id );
+			self::defer_shutdown();
+			self::$deferred_mails[] = array( $post, $fields, $payload, $flagged );
+			self::$deferred[]       = (int) $id;
 		}
 
 		return self::success( $form_id );
 	}
 
 	/**
-	 * Queue a submission for dispatch at the end of this request.
-	 *
-	 * @param int $id Submission ID.
+	 * Run the queued emails and dispatches at the end of this request.
 	 */
-	private static function defer_dispatch( $id ) {
-		if ( ! self::$deferred ) {
+	private static function defer_shutdown() {
+		if ( ! has_action( 'shutdown', array( __CLASS__, 'dispatch_deferred' ) ) ) {
 			add_action( 'shutdown', array( __CLASS__, 'dispatch_deferred' ) );
 		}
-		self::$deferred[] = (int) $id;
 	}
 
 	/**
 	 * Shutdown handler: close the connection to the visitor where the server
-	 * allows it, then send the queued submissions. Without PHP-FPM or
+	 * allows it, then send the queued emails and submissions. Without PHP-FPM or
 	 * LiteSpeed the visitor waits as before; the retry cron covers any row a
 	 * killed request leaves pending.
 	 */
 	public static function dispatch_deferred() {
-		$ids            = self::$deferred;
-		self::$deferred = array();
-		if ( ! $ids ) {
+		$ids                  = self::$deferred;
+		$mails                = self::$deferred_mails;
+		self::$deferred       = array();
+		self::$deferred_mails = array();
+		if ( ! $ids && ! $mails ) {
 			return;
 		}
 		ignore_user_abort( true );
@@ -271,6 +278,9 @@ class Pdlead_Rest_Controller {
 			fastcgi_finish_request();
 		} elseif ( function_exists( 'litespeed_finish_request' ) ) {
 			litespeed_finish_request();
+		}
+		foreach ( $mails as $args ) {
+			Pdlead_Notifier::send( ...$args );
 		}
 		foreach ( $ids as $id ) {
 			Pdlead_Lead_Dispatcher::dispatch( $id );

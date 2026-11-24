@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.8.0
+Stable tag: 1.9.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,21 @@ Updates are delivered via GitHub, not wordpress.org.
 * Leads are sent to Pipedrive right after the visitor gets the response (PHP-FPM or LiteSpeed). Failed attempts are retried by WP-Cron, so on a site with WP-Cron disabled a real system cron must call wp-cron.php.
 
 == Changelog ==
+
+= 1.9.0 =
+* New: per form email notifications. Each form has an "Email notifications" box with an email to us and a confirmation to the visitor, each with its own recipient, Reply-To, subject and plain text message. Both are off by default. Placeholders: {field_key} for every field, {all_fields}, {form_title} and {site_name}; they also work in recipients and Reply-To, so {email} addresses the visitor. The visitor email is never sent for suspicious or held submissions.
+* New: Pipedrive can be switched off per form in the new "Integrations" box. The field mapping is kept for when it is switched on again. Existing forms keep sending to Pipedrive.
+* New: custom endpoint per form. Every submission can be sent as JSON (POST, PUT or PATCH, or GET without a body) to any HTTP API, with static headers such as an API key. The body is a JSON template with fixed values and variables ({field_key}, {cookie:name}, {submission_id}, {submitted_at}, {form_id}, {form_title}, {site_url}); values are escaped automatically, and checkboxes and file fields keep their type. Failed requests are retried like Pipedrive leads.
+* New: "Preview" and "Send test request" for the custom endpoint, with sample data or one of the latest submissions of the form. The preview sends nothing and points out unknown variables; the test request shows the HTTP status and the response and changes no submission.
+* New: the submission log shows per submission what was sent to the endpoint and what it answered. Configured headers are never logged.
+* New: the form list shows which outputs are active per form (email to us, email to visitor, Pipedrive, endpoint).
+* New: form designs. Choose the default design under Settings > Design and override it per form in the new "Design" box, both with a preview image. Besides the theme based Standard design there is "Outline with floating labels": rounded outlined fields with the label on the border, large checkboxes, a framed upload box, a pill shaped button and filled success and error messages. Its colors and sizes are CSS variables.
+* New: "Additional CSS" under Settings > Design, loaded after the design styles on every page with a form. It is served as a file from the uploads folder, never inline, and gets a new URL whenever it changes.
+* New: file upload fields show the maximum file size, and "(optional)" when they are not required.
+* Changed: the submission status means "delivered to every enabled integration" instead of "sent to Pipedrive". Pipedrive and the endpoint run independently, and a retry only repeats the part that has not succeeded yet. Texts in the log, the admin notice and the failure email no longer name only Pipedrive.
+* Changed: the message of a submission in the log keeps the history of every attempt with date and attempt number, instead of only the last error. A retry that succeeds no longer hides what went wrong before.
+* Changed: the form emails are sent after the visitor has the response, like the delivery to Pipedrive. Submissions held back by the rate limit send no form emails, only the backup copy.
+* Database: two new columns for the endpoint result, added automatically on update.
 
 = 1.8.0 =
 * New: the cookies the plugin reads are now set under Settings > Cookies instead of being fixed in the code. The list defaults to the standard UTM parameters and gclid. The same list feeds the suggestions of Cookie value fields in the form editor. An empty list adds no cookies to the note. Below the field, the settings page lists common cookies to add (Google Analytics, Google Ads, Meta, LinkedIn, Microsoft Ads, TikTok, HubSpot and HandL UTM Grabber).

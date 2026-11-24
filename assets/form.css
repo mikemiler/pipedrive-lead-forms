@@ -40,6 +40,11 @@
 	margin-right: 0.5em;
 }
 
+.pdlead-file-hint {
+	font-size: 0.85em;
+	font-weight: 400;
+}
+
 .pdlead-req {
 	color: #b32d2e;
 }

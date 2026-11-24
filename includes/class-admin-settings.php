@@ -139,6 +139,11 @@ class Pdlead_Admin_Settings {
 		// Keep the stored list when the field was not part of the save.
 		$out['cookie_names'] = isset( $input['cookie_names'] ) ? implode( ', ', Pdlead_Settings::parse_cookie_names( $input['cookie_names'] ) ) : $existing['cookie_names'];
 		$out['max_attempts']           = max( 1, (int) ( $input['max_attempts'] ?? 6 ) );
+		$design                        = isset( $input['form_design'] ) ? sanitize_key( $input['form_design'] ) : '';
+		$out['form_design']            = array_key_exists( $design, Pdlead_Form_Renderer::designs() ) ? $design : $existing['form_design'];
+		// Only administrators reach this page; the CSS is served as a .css file,
+		// never printed into HTML. Keep the stored CSS when the field was not part of the save.
+		$out['custom_css'] = isset( $input['custom_css'] ) ? trim( str_replace( "\0", '', wp_check_invalid_utf8( (string) $input['custom_css'] ) ) ) : $existing['custom_css'];
 		// Owner: reject IDs that do not exist in the connected account. When the
 		// users cannot be loaded the submitted value is kept, so an API hiccup
 		// never resets the setting.
@@ -425,6 +430,24 @@ class Pdlead_Admin_Settings {
 					</tr>
 				</table>
 
+				<h2><?php esc_html_e( 'Design', 'pipedrive-lead-forms' ); ?></h2>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Default design', 'pipedrive-lead-forms' ); ?></th>
+						<td>
+							<?php self::render_design_choices( Pdlead_Settings::OPTION . '[form_design]', $s['form_design'], false ); ?>
+							<p class="description"><?php esc_html_e( 'Used by every form that keeps "Default from settings" in its Design box. Standard leaves colors and fonts to the theme.', 'pipedrive-lead-forms' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="pdlead_custom_css"><?php esc_html_e( 'Additional CSS', 'pipedrive-lead-forms' ); ?></label></th>
+						<td>
+							<textarea id="pdlead_custom_css" name="<?php echo esc_attr( Pdlead_Settings::OPTION ); ?>[custom_css]" rows="10" class="large-text code" placeholder=".pdlead-design-outline { --pdlead-surface: #fff; }"><?php echo esc_textarea( $s['custom_css'] ); ?></textarea>
+							<p class="description"><?php esc_html_e( 'Loaded after the design styles on every page with a form, so it can fine tune any design. Each form has the class pdlead-design-<key>, e.g. pdlead-design-outline. The outline design takes its colors from CSS variables (--pdlead-ink, --pdlead-border, --pdlead-surface, --pdlead-field, --pdlead-accent, --pdlead-success, --pdlead-error, --pdlead-radius, --pdlead-font-size).', 'pipedrive-lead-forms' ); ?></p>
+						</td>
+					</tr>
+				</table>
+
 				<h2><?php esc_html_e( 'File uploads', 'pipedrive-lead-forms' ); ?></h2>
 				<table class="form-table" role="presentation">
 					<tr>
@@ -464,6 +487,49 @@ class Pdlead_Admin_Settings {
 			</form>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Render the design choice: one radio card with a preview image per design.
+	 * Used by the settings page and the design box of the form editor.
+	 *
+	 * @param string $name         Input name.
+	 * @param string $current      Selected design key, '' for the default.
+	 * @param bool   $with_default Whether to offer "Default from settings" (value '').
+	 */
+	public static function render_design_choices( $name, $current, $with_default ) {
+		$designs = Pdlead_Form_Renderer::designs();
+		$choices = array();
+		if ( $with_default ) {
+			// The default card previews the design it currently stands for.
+			$default      = (string) Pdlead_Settings::get( 'form_design' );
+			$default      = isset( $designs[ $default ] ) ? $default : 'standard';
+			$choices['']  = array(
+				'image' => $default,
+				'label' => __( 'Default from settings', 'pipedrive-lead-forms' ),
+				'note'  => $designs[ $default ],
+			);
+			$current = isset( $designs[ $current ] ) ? $current : '';
+		}
+		foreach ( $designs as $key => $label ) {
+			$choices[ $key ] = array(
+				'image' => $key,
+				'label' => $label,
+				'note'  => '',
+			);
+		}
+
+		echo '<fieldset class="pdlead-designs"><legend class="screen-reader-text">' . esc_html__( 'Design', 'pipedrive-lead-forms' ) . '</legend>';
+		foreach ( $choices as $value => $choice ) {
+			echo '<label class="pdlead-design-choice">';
+			echo '<img src="' . esc_url( PDLEAD_URL . 'assets/designs/' . $choice['image'] . '.png' ) . '" alt="" loading="lazy" />';
+			echo '<span class="pdlead-design-name"><input type="radio" name="' . esc_attr( $name ) . '" value="' . esc_attr( $value ) . '" ' . checked( (string) $current, (string) $value, false ) . ' /> ' . esc_html( $choice['label'] ) . '</span>';
+			if ( '' !== $choice['note'] ) {
+				echo '<span class="pdlead-design-note">' . esc_html( $choice['note'] ) . '</span>';
+			}
+			echo '</label>';
+		}
+		echo '</fieldset>';
 	}
 
 	/**

@@ -42,6 +42,7 @@ class Pdlead_Plugin {
 
 		Pdlead_Form_CPT::init();
 		Pdlead_Notifier::init();
+		Pdlead_Webhook::init();
 		Pdlead_Form_Renderer::init();
 		Pdlead_Rest_Controller::init();
 		Pdlead_Lead_Dispatcher::init();

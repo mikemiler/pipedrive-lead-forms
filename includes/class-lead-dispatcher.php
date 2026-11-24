@@ -1,8 +1,9 @@
 <?php
 /**
- * Maps submissions to Pipedrive and pushes them. Each Pipedrive step is
- * idempotent: the resulting ID is stored immediately, so a retry never
- * creates a duplicate person, organization or lead.
+ * Delivers submissions to the integrations enabled on their form: Pipedrive
+ * and the custom endpoint. Each Pipedrive step is idempotent: the resulting
+ * ID is stored immediately, so a retry never creates a duplicate person,
+ * organization or lead.
  *
  * @package PipedriveLeadForms
  */
@@ -173,10 +174,72 @@ class Pdlead_Lead_Dispatcher {
 				$row,
 				array(
 					'retryable' => false,
-					'error'     => __( 'The form of this submission was deleted or has no fields, so it cannot be mapped to Pipedrive. The data is kept in the log and the backup email.', 'pipedrive-lead-forms' ),
+					'error'     => __( 'The form of this submission was deleted or has no fields, so it cannot be delivered. The data is kept in the log and the backup email.', 'pipedrive-lead-forms' ),
 				)
 			);
 		}
+		$form_id = (int) $row['form_id'];
+
+		// Each enabled integration runs on its own, so one failing does not
+		// hold back the other. A part that already succeeded is skipped on a
+		// retry: Pipedrive once the lead exists, the endpoint once it answered
+		// with 2xx.
+		$results = array();
+		if ( Pdlead_Form_CPT::pipedrive_enabled( $form_id ) && '' === (string) $row['pipedrive_lead_id'] ) {
+			$results[ __( 'Pipedrive', 'pipedrive-lead-forms' ) ] = self::dispatch_pipedrive( $id, $row, $payload );
+		}
+		$webhook = Pdlead_Webhook::deliver( $row, $payload );
+		if ( null !== $webhook ) {
+			$results[ __( 'Custom endpoint', 'pipedrive-lead-forms' ) ] = $webhook;
+		}
+
+		$errors    = array();
+		$warnings  = array();
+		$retryable = true;
+		foreach ( $results as $name => $res ) {
+			if ( ! empty( $res['warnings'] ) ) {
+				$warnings = array_merge( $warnings, $res['warnings'] );
+			}
+			if ( ! $res['ok'] ) {
+				$errors[] = $name . ': ' . $res['error'];
+				// A permanent error needs the owner anyway; retry only when
+				// every failed part may still succeed on its own.
+				$retryable = $retryable && $res['retryable'];
+			}
+		}
+
+		if ( $errors ) {
+			return self::handle_failure(
+				$id,
+				$row,
+				array(
+					'retryable' => $retryable,
+					'error'     => implode( '; ', array_merge( $errors, $warnings ) ),
+				)
+			);
+		}
+
+		$update = array( 'status' => Pdlead_Submission_Store::STATUS_SENT );
+		if ( $warnings ) {
+			// Earlier messages stay: a retry that succeeds must not hide what
+			// went wrong before, e.g. a file that could not be attached.
+			$update['last_error'] = Pdlead_Submission_Store::append_message( $row['last_error'], implode( '; ', $warnings ) );
+		}
+		Pdlead_Submission_Store::update( $id, $update );
+
+		return Pdlead_Submission_Store::STATUS_SENT;
+	}
+
+	/**
+	 * Create organization, person, lead, note and files in Pipedrive. Each
+	 * resulting ID is stored right away, so a retry never duplicates them.
+	 *
+	 * @param int   $id      Submission ID.
+	 * @param array $row     Claimed submission row.
+	 * @param array $payload Decoded submission values.
+	 * @return array { ok: bool, retryable: bool, error: string, warnings: string[] }
+	 */
+	private static function dispatch_pipedrive( $id, $row, $payload ) {
 		$mapped = self::map( (int) $row['form_id'], $payload );
 
 		$client      = new Pdlead_Pipedrive_Client();
@@ -216,7 +279,7 @@ class Pdlead_Lead_Dispatcher {
 					$leftover = $mapped['org_fields'];
 				}
 				if ( ! $res['ok'] ) {
-					return self::handle_failure( $id, $row, $res );
+					return self::step_failed( $res, $warnings );
 				}
 				$org_id = isset( $res['data']['data']['id'] ) ? (int) $res['data']['data']['id'] : 0;
 				if ( $leftover ) {
@@ -279,7 +342,7 @@ class Pdlead_Lead_Dispatcher {
 
 				$res = $client->create_person( $person_payload );
 				if ( ! $res['ok'] ) {
-					return self::handle_failure( $id, $row, $res );
+					return self::step_failed( $res, $warnings );
 				}
 				$person_id = isset( $res['data']['data']['id'] ) ? (int) $res['data']['data']['id'] : 0;
 			}
@@ -376,7 +439,7 @@ class Pdlead_Lead_Dispatcher {
 				);
 			}
 			if ( ! $res['ok'] ) {
-				return self::handle_failure( $id, $row, $res );
+				return self::step_failed( $res, $warnings );
 			}
 			foreach ( $leftover as $item ) {
 				$mapped['notes'][] = $item['label'] . ': ' . $item['value'];
@@ -427,16 +490,30 @@ class Pdlead_Lead_Dispatcher {
 			}
 		}
 
-		Pdlead_Submission_Store::update(
-			$id,
-			array(
-				'status'     => Pdlead_Submission_Store::STATUS_SENT,
-				'last_error' => implode( '; ', $warnings ),
-			)
+		return array(
+			'ok'        => true,
+			'retryable' => false,
+			'error'     => '',
+			'warnings'  => $warnings,
 		);
-
-		return Pdlead_Submission_Store::STATUS_SENT;
 	}
+
+	/**
+	 * Result of a failed Pipedrive step.
+	 *
+	 * @param array    $res      Client result.
+	 * @param string[] $warnings Warnings collected so far.
+	 * @return array { ok: false, retryable: bool, error: string, warnings: string[] }
+	 */
+	private static function step_failed( $res, $warnings ) {
+		return array(
+			'ok'        => false,
+			'retryable' => $res['retryable'],
+			'error'     => $res['error'],
+			'warnings'  => $warnings,
+		);
+	}
+
 
 	/**
 	 * Add the mapped organization field values to an organization payload.
@@ -557,16 +634,21 @@ class Pdlead_Lead_Dispatcher {
 	}
 
 	/**
-	 * Handle a failed Pipedrive step: schedule a retry or give up.
+	 * Handle a failed delivery: schedule a retry or give up.
 	 *
 	 * @param int   $id  Submission ID.
 	 * @param array $row Current row.
-	 * @param array $res Client result.
+	 * @param array $res Result ( retryable, error ).
 	 * @return string Resulting status.
 	 */
 	private static function handle_failure( $id, $row, $res ) {
 		$attempts     = (int) $row['attempts'] + 1;
 		$max_attempts = (int) Pdlead_Settings::get( 'max_attempts' );
+		$history      = Pdlead_Submission_Store::append_message(
+			$row['last_error'],
+			/* translators: 1: attempt number, 2: error message. */
+			sprintf( __( 'Attempt %1$d: %2$s', 'pipedrive-lead-forms' ), $attempts, $res['error'] )
+		);
 
 		if ( $res['retryable'] && $attempts < $max_attempts ) {
 			$delay = min( HOUR_IN_SECONDS, 60 * pow( 2, $attempts ) );
@@ -575,7 +657,7 @@ class Pdlead_Lead_Dispatcher {
 				array(
 					'status'          => Pdlead_Submission_Store::STATUS_PENDING,
 					'attempts'        => $attempts,
-					'last_error'      => $res['error'],
+					'last_error'      => $history,
 					'next_attempt_at' => gmdate( 'Y-m-d H:i:s', time() + $delay ),
 				)
 			);
@@ -588,7 +670,7 @@ class Pdlead_Lead_Dispatcher {
 			array(
 				'status'     => Pdlead_Submission_Store::STATUS_FAILED,
 				'attempts'   => $attempts,
-				'last_error' => $res['error'],
+				'last_error' => $history,
 			)
 		);
 		self::notify_failure( $id, $res['error'] );
@@ -614,7 +696,7 @@ class Pdlead_Lead_Dispatcher {
 	}
 
 	/**
-	 * Email the admin when a lead permanently fails to reach Pipedrive.
+	 * Email the admin when a submission permanently fails to be delivered.
 	 *
 	 * @param int    $id    Submission ID.
 	 * @param string $error Error message.
@@ -628,11 +710,11 @@ class Pdlead_Lead_Dispatcher {
 			return;
 		}
 
-		$subject = __( 'Pipedrive lead failed to sync', 'pipedrive-lead-forms' );
+		$subject = __( 'Form submission could not be delivered', 'pipedrive-lead-forms' );
 		$link    = admin_url( 'edit.php?post_type=' . PDLEAD_CPT . '&page=pdlead-log' );
 		$body    = sprintf(
 			/* translators: 1: submission ID, 2: error message, 3: admin URL. */
-			__( "A lead could not be created in Pipedrive after several attempts.\n\nSubmission ID: %1\$d\nError: %2\$s\n\nReview and retry: %3\$s", 'pipedrive-lead-forms' ),
+			__( "A form submission could not be delivered after several attempts.\n\nSubmission ID: %1\$d\nError: %2\$s\n\nReview and retry: %3\$s", 'pipedrive-lead-forms' ),
 			$id,
 			$error,
 			$link

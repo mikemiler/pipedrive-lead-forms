@@ -3,7 +3,7 @@
  * Plugin Name:       Pipedrive Lead Forms
  * Plugin URI:        https://github.com/mikemiler/pipedrive-lead-forms
  * Description:        Configurable front-end forms that log every submission locally and create leads in Pipedrive. Includes file uploads, bot protection and cache safe submission.
- * Version:           1.8.0
+ * Version:           1.9.0
  * Requires at least:  6.0
  * Requires PHP:       7.4
  * Author:            WP Mike
@@ -21,8 +21,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'PDLEAD_VERSION', '1.8.0' );
-define( 'PDLEAD_DB_VERSION', 1 );
+define( 'PDLEAD_VERSION', '1.9.0' );
+define( 'PDLEAD_DB_VERSION', 2 );
 define( 'PDLEAD_FILE', __FILE__ );
 define( 'PDLEAD_PATH', plugin_dir_path( __FILE__ ) );
 define( 'PDLEAD_URL', plugin_dir_url( __FILE__ ) );
@@ -37,6 +37,7 @@ require_once PDLEAD_PATH . 'includes/class-settings.php';
 require_once PDLEAD_PATH . 'includes/class-file-store.php';
 require_once PDLEAD_PATH . 'includes/class-form-cpt.php';
 require_once PDLEAD_PATH . 'includes/class-notifier.php';
+require_once PDLEAD_PATH . 'includes/class-webhook.php';
 require_once PDLEAD_PATH . 'includes/class-form-renderer.php';
 require_once PDLEAD_PATH . 'includes/class-bot-guard.php';
 require_once PDLEAD_PATH . 'includes/class-pipedrive-client.php';

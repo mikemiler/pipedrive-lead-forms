@@ -234,9 +234,135 @@
 		} );
 	}
 
+	/**
+	 * Hide the JSON body of the custom endpoint for GET, which sends none.
+	 */
+	function syncWebhookMethod() {
+		var method = document.getElementById( 'pdlead-webhook-method' );
+		var row = document.querySelector( '.pdlead-webhook-body-row' );
+		if ( method && row ) {
+			row.classList.toggle( 'pdlead-webhook-hidden', method.value === 'GET' );
+		}
+	}
+
+	/**
+	 * Append an element with plain text content to a parent.
+	 *
+	 * @param {HTMLElement} parent    Parent element.
+	 * @param {string}      tag       Tag name.
+	 * @param {string}      text      Text content, never parsed as HTML.
+	 * @param {string}      className Optional class name.
+	 * @return {HTMLElement} The new element.
+	 */
+	function appendText( parent, tag, text, className ) {
+		var el = document.createElement( tag );
+		el.textContent = text;
+		if ( className ) {
+			el.className = className;
+		}
+		parent.appendChild( el );
+		return el;
+	}
+
+	/**
+	 * Show a preview or test result below the buttons.
+	 *
+	 * @param {HTMLElement} box  Result container.
+	 * @param {Object}      data Response data of the ajax call.
+	 */
+	function renderWebhookResult( box, data ) {
+		box.textContent = '';
+		appendText( box, 'p', data.method + ' ' + data.url, 'pdlead-webhook-request' );
+		if ( data.error ) {
+			appendText( box, 'p', data.error, 'pdlead-error' );
+		}
+		if ( data.unknown && data.unknown.length ) {
+			appendText( box, 'p', box.parentNode.getAttribute( 'data-unknown' ) + ' ' + data.unknown.join( ', ' ), 'pdlead-error' );
+		}
+		if ( data.body ) {
+			appendText( box, 'pre', data.body, 'pdlead-code' );
+		}
+		if ( data.response ) {
+			var res = data.response;
+			var line = res.status_code ? 'HTTP ' + res.status_code : '';
+			line += ( line ? ', ' : '' ) + res.duration_ms + ' ms';
+			appendText( box, 'p', line, res.ok ? 'pdlead-webhook-ok' : 'pdlead-error' );
+			if ( res.error ) {
+				appendText( box, 'p', res.error, 'pdlead-error' );
+			}
+			if ( res.response_body ) {
+				appendText( box, 'pre', res.response_body, 'pdlead-code' );
+			}
+		}
+	}
+
+	/**
+	 * Post the unsaved endpoint settings for a preview or a test request.
+	 *
+	 * @param {HTMLElement} button The clicked button, data-action names the ajax action.
+	 */
+	function runWebhook( button ) {
+		var wrap = button.closest( '.pdlead-webhook-preview' );
+		var box = wrap ? wrap.querySelector( '.pdlead-webhook-result' ) : null;
+		if ( ! box ) {
+			return;
+		}
+		var value = function ( id ) {
+			var el = document.getElementById( id );
+			return el ? el.value : '';
+		};
+		var action = button.getAttribute( 'data-action' );
+		if ( action === 'pdlead_webhook_test' && ! window.confirm( wrap.getAttribute( 'data-confirm' ) + '\n\n' + value( 'pdlead-webhook-url' ) ) ) {
+			return;
+		}
+
+		var body = new FormData();
+		body.append( 'action', action );
+		body.append( 'nonce', wrap.getAttribute( 'data-nonce' ) );
+		body.append( 'post_id', wrap.getAttribute( 'data-post-id' ) );
+		body.append( 'source', value( 'pdlead-webhook-source' ) );
+		body.append( 'url', value( 'pdlead-webhook-url' ) );
+		body.append( 'method', value( 'pdlead-webhook-method' ) );
+		body.append( 'headers', value( 'pdlead-webhook-headers' ) );
+		body.append( 'body', value( 'pdlead-webhook-body' ) );
+
+		button.disabled = true;
+		window.fetch( wrap.getAttribute( 'data-ajax-url' ), { method: 'POST', credentials: 'same-origin', body: body } )
+			.then( function ( response ) {
+				return response.json();
+			} )
+			.then( function ( json ) {
+				if ( json && json.success ) {
+					renderWebhookResult( box, json.data );
+				} else {
+					box.textContent = '';
+					appendText( box, 'p', json && json.data && json.data.message ? json.data.message : wrap.getAttribute( 'data-error' ), 'pdlead-error' );
+				}
+			} )
+			.catch( function () {
+				box.textContent = '';
+				appendText( box, 'p', wrap.getAttribute( 'data-error' ), 'pdlead-error' );
+			} )
+			.then( function () {
+				button.disabled = false;
+			} );
+	}
+
 	document.addEventListener( 'DOMContentLoaded', function () {
 		document.addEventListener( 'click', onClick );
 		document.addEventListener( 'change', onChange );
+
+		var webhookButtons = document.querySelectorAll( '.pdlead-webhook-run' );
+		Array.prototype.forEach.call( webhookButtons, function ( button ) {
+			button.addEventListener( 'click', function () {
+				runWebhook( button );
+			} );
+		} );
+		var webhookMethod = document.getElementById( 'pdlead-webhook-method' );
+		if ( webhookMethod ) {
+			webhookMethod.addEventListener( 'change', syncWebhookMethod );
+			syncWebhookMethod();
+		}
 
 		// Apply the initial visibility to rows rendered on the server.
 		var rows = document.querySelectorAll( '#pdlead-fields-table .pdlead-field-row' );

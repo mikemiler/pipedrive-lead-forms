@@ -21,6 +21,17 @@ class Pdlead_Form_CPT {
 	const META_SENDING_MSG    = '_pdlead_sending_message';
 
 	/**
+	 * Design key of the form. Empty means the default from the settings.
+	 */
+	const META_DESIGN = '_pdlead_design';
+
+	/**
+	 * Whether the form sends to Pipedrive: '1' or '0'. Missing means on, so
+	 * forms created before the switch existed keep sending.
+	 */
+	const META_PIPEDRIVE = '_pdlead_pipedrive';
+
+	/**
 	 * Prefix of map_to values that target a Pipedrive organization field; the
 	 * field code follows, e.g. "org_field:website".
 	 */
@@ -110,6 +121,16 @@ class Pdlead_Form_CPT {
 	}
 
 	/**
+	 * Whether a form sends its submissions to Pipedrive.
+	 *
+	 * @param int $post_id Form post ID.
+	 * @return bool
+	 */
+	public static function pipedrive_enabled( $post_id ) {
+		return '0' !== get_post_meta( $post_id, self::META_PIPEDRIVE, true );
+	}
+
+	/**
 	 * Register hooks.
 	 */
 	public static function init() {
@@ -173,8 +194,16 @@ class Pdlead_Form_CPT {
 	 * @return array
 	 */
 	public static function columns( $columns ) {
-		$columns['pdlead_shortcode'] = __( 'Shortcode', 'pipedrive-lead-forms' );
-		return $columns;
+		// The outputs go right after the title.
+		$out = array();
+		foreach ( $columns as $key => $label ) {
+			$out[ $key ] = $label;
+			if ( 'title' === $key ) {
+				$out['pdlead_outputs'] = __( 'Outputs', 'pipedrive-lead-forms' );
+			}
+		}
+		$out['pdlead_shortcode'] = __( 'Shortcode', 'pipedrive-lead-forms' );
+		return $out;
 	}
 
 	/**
@@ -186,17 +215,49 @@ class Pdlead_Form_CPT {
 	public static function column_content( $column, $post_id ) {
 		if ( 'pdlead_shortcode' === $column ) {
 			echo '<code>[pdlead_form id="' . esc_attr( $post_id ) . '"]</code>';
+		} elseif ( 'pdlead_outputs' === $column ) {
+			self::render_outputs( $post_id );
 		}
 	}
 
 	/**
-	 * Enqueue the repeater script on the edit screen only.
+	 * Render one badge per active output of a form.
+	 *
+	 * @param int $post_id Post ID.
+	 */
+	private static function render_outputs( $post_id ) {
+		$emails  = Pdlead_Notifier::get( $post_id, self::get_fields( $post_id ) );
+		$outputs = array(
+			__( 'Email to us', 'pipedrive-lead-forms' )      => ! empty( $emails['admin']['enabled'] ),
+			__( 'Email to visitor', 'pipedrive-lead-forms' ) => ! empty( $emails['user']['enabled'] ),
+			__( 'Pipedrive', 'pipedrive-lead-forms' )        => self::pipedrive_enabled( $post_id ),
+			__( 'Endpoint', 'pipedrive-lead-forms' )         => Pdlead_Webhook::is_enabled( $post_id ),
+		);
+
+		$badges = array();
+		foreach ( array_keys( array_filter( $outputs ) ) as $label ) {
+			$badges[] = '<span class="pdlead-badge pdlead-badge-output">' . esc_html( $label ) . '</span>';
+		}
+		if ( ! $badges ) {
+			echo '<span aria-hidden="true">-</span><span class="screen-reader-text">' . esc_html__( 'No output active', 'pipedrive-lead-forms' ) . '</span>';
+			return;
+		}
+		echo implode( ' ', $badges ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- each badge is escaped above.
+	}
+
+	/**
+	 * Enqueue the styles on the form list and the editor, and the editor
+	 * script on the edit screen only.
 	 *
 	 * @param string $hook Current admin page.
 	 */
 	public static function enqueue_admin( $hook ) {
 		$screen = get_current_screen();
 		if ( ! $screen || PDLEAD_CPT !== $screen->post_type ) {
+			return;
+		}
+		if ( 'edit.php' === $hook ) {
+			wp_enqueue_style( 'pdlead-admin', PDLEAD_URL . 'assets/admin.css', array(), PDLEAD_VERSION );
 			return;
 		}
 		if ( 'post.php' !== $hook && 'post-new.php' !== $hook ) {
@@ -219,6 +280,33 @@ class Pdlead_Form_CPT {
 			'normal',
 			'high'
 		);
+		add_meta_box(
+			'pdlead_design_box',
+			__( 'Design', 'pipedrive-lead-forms' ),
+			array( __CLASS__, 'render_design_box' ),
+			PDLEAD_CPT,
+			'side'
+		);
+	}
+
+	/**
+	 * Get the design chosen for a form, or '' for the default from the settings.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string
+	 */
+	public static function get_design( $post_id ) {
+		return (string) get_post_meta( $post_id, self::META_DESIGN, true );
+	}
+
+	/**
+	 * Render the design box. It is saved with the field editor, under its nonce.
+	 *
+	 * @param WP_Post $post Current post.
+	 */
+	public static function render_design_box( $post ) {
+		Pdlead_Admin_Settings::render_design_choices( 'pdlead_design', self::get_design( $post->ID ), true );
+		echo '<p class="description">' . esc_html__( 'The additional CSS from the settings applies to every design.', 'pipedrive-lead-forms' ) . '</p>';
 	}
 
 	/**
@@ -595,5 +683,8 @@ class Pdlead_Form_CPT {
 		update_post_meta( $post_id, self::META_ERROR_MSG, $error_message );
 		update_post_meta( $post_id, self::META_VALIDATION_MSG, $validation_message );
 		update_post_meta( $post_id, self::META_SENDING_MSG, $sending_message );
+
+		$design = isset( $_POST['pdlead_design'] ) ? sanitize_key( wp_unslash( $_POST['pdlead_design'] ) ) : '';
+		update_post_meta( $post_id, self::META_DESIGN, array_key_exists( $design, Pdlead_Form_Renderer::designs() ) ? $design : '' );
 	}
 }
