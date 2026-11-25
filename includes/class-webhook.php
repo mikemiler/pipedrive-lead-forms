@@ -58,7 +58,7 @@ class Pdlead_Webhook {
 	 * endpoint starts disabled, so existing forms send nothing new.
 	 *
 	 * @param int $post_id Form post ID.
-	 * @return array { enabled: int, url: string, method: string, headers: string, body: string }
+	 * @return array { enabled: int, url: string, method: string, headers: string, body: string, sample: string }
 	 */
 	public static function get( $post_id ) {
 		$defaults = array(
@@ -67,6 +67,7 @@ class Pdlead_Webhook {
 			'method'  => 'POST',
 			'headers' => '',
 			'body'    => '',
+			'sample'  => '',
 		);
 		$stored   = get_post_meta( $post_id, self::META, true );
 		return is_array( $stored ) ? array_merge( $defaults, $stored ) : $defaults;
@@ -161,6 +162,11 @@ class Pdlead_Webhook {
 
 		echo '<tr><th scope="row">' . esc_html__( 'Variables', 'pipedrive-lead-forms' ) . '</th><td>';
 		self::render_variables( $fields );
+		echo '</td></tr>';
+
+		echo '<tr><th scope="row"><label for="pdlead-webhook-sample">' . esc_html__( 'Sample data', 'pipedrive-lead-forms' ) . '</label></th><td>';
+		echo '<textarea id="pdlead-webhook-sample" name="' . esc_attr( $name ) . '[sample]" rows="4" class="large-text code" placeholder="zip: 10115&#10;city: Berlin">' . esc_textarea( $config['sample'] ) . '</textarea>';
+		echo '<p class="description">' . esc_html__( 'Optional. Your own values for "Sample data" in the preview and the test request, one per line as "field_key: value" or "cookie:name: value". Every other field keeps its generated sample value. Never sent with real submissions.', 'pipedrive-lead-forms' ) . '</p>';
 		echo '</td></tr>';
 
 		echo '<tr><th scope="row"><label for="pdlead-webhook-source">' . esc_html__( 'Preview', 'pipedrive-lead-forms' ) . '</label></th><td>';
@@ -315,6 +321,7 @@ class Pdlead_Webhook {
 			// Keep line breaks, drop every other control character.
 			'headers' => preg_replace( '/[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/', '', $text( 'headers' ) ),
 			'body'    => preg_replace( '/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/', '', $text( 'body' ) ),
+			'sample'  => preg_replace( '/[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/', '', $text( 'sample' ) ),
 		);
 	}
 
@@ -725,6 +732,7 @@ class Pdlead_Webhook {
 				'method'  => isset( $_POST['method'] ) ? wp_unslash( $_POST['method'] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized in sanitize_config().
 				'headers' => isset( $_POST['headers'] ) ? wp_unslash( $_POST['headers'] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized in sanitize_config().
 				'body'    => isset( $_POST['body'] ) ? wp_unslash( $_POST['body'] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized in sanitize_config().
+				'sample'  => isset( $_POST['sample'] ) ? wp_unslash( $_POST['sample'] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized in sanitize_config().
 			)
 		);
 		$fields = Pdlead_Form_CPT::get_fields( $post_id );
@@ -741,7 +749,7 @@ class Pdlead_Webhook {
 				'created_at' => $row['created_at'],
 			);
 		} else {
-			$payload = self::sample_payload( $fields, $config['url'] . $config['body'] );
+			$payload = self::sample_payload( $fields, $config['url'] . $config['body'], $config['sample'] );
 			$meta    = array(
 				'id'         => 123,
 				'created_at' => gmdate( 'Y-m-d H:i:s' ),
@@ -769,13 +777,24 @@ class Pdlead_Webhook {
 	}
 
 	/**
-	 * Sample values for the preview, shaped like a stored submission.
+	 * Sample values for the preview, shaped like a stored submission. The
+	 * owner's own sample values replace the generated ones.
 	 *
 	 * @param array[] $fields   Field definitions.
 	 * @param string  $template URL and body template, scanned for cookie variables.
+	 * @param string  $custom   Own sample values, one "key: value" per line.
 	 * @return array
 	 */
-	private static function sample_payload( $fields, $template ) {
+	private static function sample_payload( $fields, $template, $custom ) {
+		$own = array();
+		foreach ( preg_split( '/\r\n|\r|\n/', (string) $custom ) as $line ) {
+			// The key is a field key or "cookie:name"; the value is everything
+			// after the colon that follows it.
+			if ( preg_match( '/^\s*((?:cookie:)?[A-Za-z0-9_.-]+)\s*:(.*)$/', $line, $m ) ) {
+				$own[ $m[1] ] = trim( $m[2] );
+			}
+		}
+
 		$payload = array();
 		foreach ( $fields as $field ) {
 			$key = isset( $field['key'] ) ? $field['key'] : '';
@@ -824,6 +843,10 @@ class Pdlead_Webhook {
 					$value = sprintf( __( 'Sample %s', 'pipedrive-lead-forms' ), $label );
 					break;
 			}
+			// File fields keep their list shape, a line of text cannot replace it.
+			if ( isset( $own[ $key ] ) && 'file' !== $type ) {
+				$value = $own[ $key ];
+			}
 			$payload[ $key ] = $value;
 		}
 
@@ -832,7 +855,7 @@ class Pdlead_Webhook {
 			$names = array_merge( $names, $m[1] );
 		}
 		foreach ( array_unique( $names ) as $name ) {
-			$payload[ Pdlead_Form_CPT::COOKIES_KEY ][ $name ] = 'sample_' . $name;
+			$payload[ Pdlead_Form_CPT::COOKIES_KEY ][ $name ] = isset( $own[ 'cookie:' . $name ] ) ? $own[ 'cookie:' . $name ] : 'sample_' . $name;
 		}
 
 		return $payload;

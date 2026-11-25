@@ -325,6 +325,7 @@
 		body.append( 'method', value( 'pdlead-webhook-method' ) );
 		body.append( 'headers', value( 'pdlead-webhook-headers' ) );
 		body.append( 'body', value( 'pdlead-webhook-body' ) );
+		body.append( 'sample', value( 'pdlead-webhook-sample' ) );
 
 		button.disabled = true;
 		window.fetch( wrap.getAttribute( 'data-ajax-url' ), { method: 'POST', credentials: 'same-origin', body: body } )

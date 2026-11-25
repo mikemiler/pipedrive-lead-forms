@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.9.2
+Stable tag: 1.9.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,9 @@ Updates are delivered via GitHub, not wordpress.org.
 * Leads are sent to Pipedrive right after the visitor gets the response (PHP-FPM or LiteSpeed). Failed attempts are retried by WP-Cron, so on a site with WP-Cron disabled a real system cron must call wp-cron.php.
 
 == Changelog ==
+
+= 1.9.3 =
+* New: own sample data for the custom endpoint. The new "Sample data" field takes one "field_key: value" or "cookie:name: value" per line and replaces the generated values in the preview and the test request, e.g. a valid zip code for an API that checks it. Saved with the form, never used for real submissions.
 
 = 1.9.2 =
 * New: "Button text" per form in the submission messages box. Leave it empty to keep the default "Send".
