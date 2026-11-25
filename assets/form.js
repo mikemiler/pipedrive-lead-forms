@@ -315,11 +315,31 @@
 	}
 
 	/**
+	 * Pass the background color behind the form to the CSS, so a floating label
+	 * covers the field border with the color the page actually shows. Uses the
+	 * first ancestor with an opaque background color; without one, the CSS
+	 * fallback applies.
+	 *
+	 * @param {HTMLElement} form Form element.
+	 */
+	function setPageBackground( form ) {
+		for ( var el = form.parentElement; el; el = el.parentElement ) {
+			var color = window.getComputedStyle( el ).backgroundColor;
+			if ( color && color !== 'transparent' && ! /,\s*0\)$/.test( color ) ) {
+				form.style.setProperty( '--pdlead-page-bg', color );
+				return;
+			}
+		}
+	}
+
+	/**
 	 * Bind every form on the page.
 	 */
 	function init() {
 		var forms = document.querySelectorAll( '.pdlead-form' );
 		Array.prototype.forEach.call( forms, function ( form ) {
+			setPageBackground( form );
+
 			// Prefetch the token now so the time trap measures real fill time.
 			getToken( form, false );
 			form.addEventListener( 'submit', onSubmit );

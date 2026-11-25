@@ -291,7 +291,7 @@ class Pdlead_Form_Renderer {
 		?>
 		<form class="pdlead-form pdlead-design-<?php echo esc_attr( $design ); ?>" method="post" data-pdlead-form="<?php echo esc_attr( $form_id ); ?>" data-pdlead-error="<?php echo esc_attr( $error_message ); ?>" data-pdlead-sending="<?php echo esc_attr( $sending_message ); ?>" data-pdlead-max-bytes="<?php echo esc_attr( $max_bytes ); ?>" data-pdlead-max-files="<?php echo esc_attr( $max_files ); ?>" data-pdlead-max-total="<?php echo esc_attr( $max_total ); ?>" novalidate>
 			<?php foreach ( $fields as $field ) : ?>
-				<?php echo self::render_field( $field, $id_prefix, $design ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+				<?php echo self::render_field( $field, $id_prefix ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 			<?php endforeach; ?>
 
 			<?php // Honeypot: hidden from humans, assistive tech and keyboard nav. ?>
@@ -324,10 +324,9 @@ class Pdlead_Form_Renderer {
 	 *
 	 * @param array  $field     Field definition.
 	 * @param string $id_prefix Element ID prefix unique to this form instance.
-	 * @param string $design    Design key.
 	 * @return string
 	 */
-	private static function render_field( $field, $id_prefix, $design ) {
+	private static function render_field( $field, $id_prefix ) {
 		$key      = isset( $field['key'] ) ? $field['key'] : '';
 		$label    = isset( $field['label'] ) ? $field['label'] : '';
 		$type     = isset( $field['type'] ) ? $field['type'] : 'text';
@@ -338,9 +337,9 @@ class Pdlead_Form_Renderer {
 		$auto     = isset( self::AUTOCOMPLETE[ $map ] ) ? ' autocomplete="' . self::AUTOCOMPLETE[ $map ] . '"' : '';
 		$req_attr = $required ? ' required' : '';
 		$req_mark = $required ? ' <span class="pdlead-req" aria-hidden="true">*</span>' : '';
-		// The outline design shows the placeholder instead of the label until a
-		// value is entered, so the placeholder carries the required mark there.
-		$placeholder = $label . ( $required && 'outline' === $design ? '*' : '' );
+		// The outline design hides the placeholder and moves the label into the
+		// field instead; it still needs the attribute to detect an empty field.
+		$placeholder = $label;
 
 		// Hidden and cookie values are added on the server at submission, so
 		// nothing is rendered: visitors can neither see nor change them.

@@ -1,6 +1,7 @@
 /*
- * Outline design: rounded outlined fields whose label floats onto the border
- * once a value is entered, square checkboxes, a framed upload box and a pill
+ * Outline design: rounded outlined fields whose label sits inside the field
+ * and floats onto the border on focus or once a value is entered, square
+ * checkboxes, a framed upload box and a pill
  * shaped button. Loaded on top of form.css. Colors, sizes and radius come
  * from the variables below, so the additional CSS in the settings can adjust
  * them. Fonts are inherited from the theme.
@@ -9,8 +10,8 @@
 .pdlead-design-outline {
 	--pdlead-ink: #184e51;
 	--pdlead-border: rgba(24, 78, 81, 0.25);
-	/* Background behind the floating label: set it to the page background. */
-	--pdlead-surface: #f5f5f5;
+	/* The floating label's background follows the page background behind the
+	   form (detected by form.js). Set --pdlead-surface to override it. */
 	--pdlead-field: transparent;
 	--pdlead-accent: #35ed54;
 	--pdlead-accent-hover: #2bd649;
@@ -68,10 +69,10 @@
 	cursor: pointer;
 }
 
+/* The label takes the placeholder's place, see below. */
 .pdlead-design-outline .pdlead-row input::placeholder,
 .pdlead-design-outline .pdlead-row textarea::placeholder {
-	color: var(--pdlead-ink);
-	opacity: 1;
+	opacity: 0;
 }
 
 .pdlead-design-outline .pdlead-row input:focus,
@@ -87,31 +88,40 @@
 }
 
 /*
- * Floating label. The placeholder shows the label until a value is entered,
- * then the label sits on the top border. Selects have no placeholder, so
- * their label always floats. The label stays in the DOM for screen readers.
- * Browsers without :has() show the label above the field instead.
+ * Floating label. While the field is empty and not focused, the label sits
+ * inside it where the placeholder text would be. On focus or once a value is
+ * entered it shrinks and moves onto the top border. Selects always show a
+ * value, so their label always floats. Browsers without :has() show the
+ * label above the field instead.
  */
 .pdlead-design-outline .pdlead-row:has(> input[type="text"], > input[type="email"], > input[type="tel"], > textarea, > select) > label {
 	position: absolute;
 	top: 0;
-	left: 20px;
+	left: 0;
 	z-index: 1;
+	box-sizing: border-box;
+	max-width: 100%;
 	margin: 0;
-	padding: 0 6px;
-	background: var(--pdlead-surface);
+	padding: 16px 27px;
+	overflow: hidden;
+	background: transparent;
 	color: var(--pdlead-ink);
-	font-size: 12px;
+	font-size: var(--pdlead-font-size);
 	font-weight: 400;
-	line-height: 14px;
-	opacity: 0;
+	line-height: 22px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	pointer-events: none;
-	transform: translateY(-50%);
-	transition: opacity 0.15s ease;
+	transition: padding 0.2s ease-in-out, font-size 0.2s ease-in-out, line-height 0.2s ease-in-out, transform 0.2s ease-in-out, background-color 0.2s ease-in-out;
 }
 
-.pdlead-design-outline .pdlead-row:has(> input:not(:placeholder-shown), > textarea:not(:placeholder-shown), > select) > label {
-	opacity: 1;
+.pdlead-design-outline .pdlead-row:has(> input:focus, > input:not(:placeholder-shown), > textarea:focus, > textarea:not(:placeholder-shown), > select) > label {
+	max-width: calc(100% - 40px);
+	padding: 0 6px;
+	background: var(--pdlead-surface, var(--pdlead-page-bg, #fff));
+	font-size: 12px;
+	line-height: 14px;
+	transform: translate(20px, -50%);
 }
 
 .pdlead-design-outline .pdlead-req {
@@ -316,6 +326,18 @@
 	.pdlead-design-outline .pdlead-row select {
 		padding-right: 48px;
 		background-position: right 18px center;
+	}
+
+	.pdlead-design-outline .pdlead-row:has(> input[type="text"], > input[type="email"], > input[type="tel"], > textarea, > select) > label {
+		padding-right: 19px;
+		padding-left: 19px;
+	}
+
+	.pdlead-design-outline .pdlead-row:has(> input:focus, > input:not(:placeholder-shown), > textarea:focus, > textarea:not(:placeholder-shown), > select) > label {
+		max-width: calc(100% - 24px);
+		padding-right: 6px;
+		padding-left: 6px;
+		transform: translate(12px, -50%);
 	}
 
 	.pdlead-design-outline .pdlead-row input[type="file"]::file-selector-button {

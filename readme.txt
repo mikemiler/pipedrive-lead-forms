@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.9.0
+Stable tag: 1.9.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,10 @@ Updates are delivered via GitHub, not wordpress.org.
 * Leads are sent to Pipedrive right after the visitor gets the response (PHP-FPM or LiteSpeed). Failed attempts are retried by WP-Cron, so on a site with WP-Cron disabled a real system cron must call wp-cron.php.
 
 == Changelog ==
+
+= 1.9.1 =
+* Changed: in the "Outline with floating labels" design the label now sits inside the empty field in place of the placeholder and moves onto the border as soon as the field is focused, not only once a value is entered.
+* Fixed: the background behind the floating label follows the page background behind the form instead of a fixed light grey. --pdlead-surface still overrides it.
 
 = 1.9.0 =
 * New: per form email notifications. Each form has an "Email notifications" box with an email to us and a confirmation to the visitor, each with its own recipient, Reply-To, subject and plain text message. Both are off by default. Placeholders: {field_key} for every field, {all_fields}, {form_title} and {site_name}; they also work in recipients and Reply-To, so {email} addresses the visitor. The visitor email is never sent for suspicious or held submissions.
