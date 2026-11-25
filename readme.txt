@@ -4,7 +4,7 @@ Tags: pipedrive, leads, forms, crm
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.9.1
+Stable tag: 1.9.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,9 @@ Updates are delivered via GitHub, not wordpress.org.
 * Leads are sent to Pipedrive right after the visitor gets the response (PHP-FPM or LiteSpeed). Failed attempts are retried by WP-Cron, so on a site with WP-Cron disabled a real system cron must call wp-cron.php.
 
 == Changelog ==
+
+= 1.9.2 =
+* New: "Button text" per form in the submission messages box. Leave it empty to keep the default "Send".
 
 = 1.9.1 =
 * Changed: in the "Outline with floating labels" design the label now sits inside the empty field in place of the placeholder and moves onto the border as soon as the field is focused, not only once a value is entered.

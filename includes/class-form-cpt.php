@@ -19,6 +19,7 @@ class Pdlead_Form_CPT {
 	const META_ERROR_MSG      = '_pdlead_error_message';
 	const META_VALIDATION_MSG = '_pdlead_validation_message';
 	const META_SENDING_MSG    = '_pdlead_sending_message';
+	const META_BUTTON_TEXT    = '_pdlead_button_text';
 
 	/**
 	 * Design key of the form. Empty means the default from the settings.
@@ -364,6 +365,16 @@ class Pdlead_Form_CPT {
 	}
 
 	/**
+	 * Get the form specific submit button text, or '' when none is set.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string
+	 */
+	public static function get_button_text( $post_id ) {
+		return (string) get_post_meta( $post_id, self::META_BUTTON_TEXT, true );
+	}
+
+	/**
 	 * Render the field editor meta box.
 	 *
 	 * @param WP_Post $post Current post.
@@ -443,9 +454,13 @@ class Pdlead_Form_CPT {
 		$error_message      = self::get_error_message( $post->ID );
 		$validation_message = self::get_validation_message( $post->ID );
 		$sending_message    = self::get_sending_message( $post->ID );
+		$button_text        = self::get_button_text( $post->ID );
 
 		echo '<h2 class="pdlead-messages-title">' . esc_html__( 'Submission messages', 'pipedrive-lead-forms' ) . '</h2>';
-		echo '<p class="description">' . esc_html__( 'Shown to the visitor around submitting the form. Leave empty to use the default text. HTML links are allowed.', 'pipedrive-lead-forms' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Shown to the visitor around submitting the form. Leave empty to use the default text. HTML links are allowed in the messages.', 'pipedrive-lead-forms' ) . '</p>';
+
+		echo '<p><label for="pdlead-button-text"><strong>' . esc_html__( 'Button text', 'pipedrive-lead-forms' ) . '</strong></label><br />';
+		echo '<input type="text" id="pdlead-button-text" name="pdlead_button_text" class="widefat" value="' . esc_attr( $button_text ) . '" placeholder="' . esc_attr__( 'Send', 'pipedrive-lead-forms' ) . '" /></p>';
 
 		echo '<p><label for="pdlead-success-message"><strong>' . esc_html__( 'Success message', 'pipedrive-lead-forms' ) . '</strong></label><br />';
 		echo '<textarea id="pdlead-success-message" name="pdlead_success_message" rows="2" class="widefat" placeholder="' . esc_attr__( 'Thank you. Your message has been sent.', 'pipedrive-lead-forms' ) . '">' . esc_textarea( $success_message ) . '</textarea></p>';
@@ -683,6 +698,10 @@ class Pdlead_Form_CPT {
 		update_post_meta( $post_id, self::META_ERROR_MSG, $error_message );
 		update_post_meta( $post_id, self::META_VALIDATION_MSG, $validation_message );
 		update_post_meta( $post_id, self::META_SENDING_MSG, $sending_message );
+
+		// The button text is plain text: a button cannot hold links.
+		$button_text = isset( $_POST['pdlead_button_text'] ) ? sanitize_text_field( wp_unslash( $_POST['pdlead_button_text'] ) ) : '';
+		update_post_meta( $post_id, self::META_BUTTON_TEXT, $button_text );
 
 		$design = isset( $_POST['pdlead_design'] ) ? sanitize_key( wp_unslash( $_POST['pdlead_design'] ) ) : '';
 		update_post_meta( $post_id, self::META_DESIGN, array_key_exists( $design, Pdlead_Form_Renderer::designs() ) ? $design : '' );

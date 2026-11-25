@@ -275,6 +275,10 @@ class Pdlead_Form_Renderer {
 		// sending text shows while the request is in flight.
 		$error_message   = Pdlead_Form_CPT::get_error_message( $form_id );
 		$sending_message = Pdlead_Form_CPT::get_sending_message( $form_id );
+		$button_text     = Pdlead_Form_CPT::get_button_text( $form_id );
+		if ( '' === $button_text ) {
+			$button_text = __( 'Send', 'pipedrive-lead-forms' );
+		}
 
 		++self::$instance;
 		$id_prefix = 'pdlead-' . $form_id . '-' . self::$instance . '-';
@@ -311,7 +315,7 @@ class Pdlead_Form_Renderer {
 			<input type="hidden" name="pdlead_sig" value="" />
 
 			<?php // wp-element-button picks up the button style of block themes. ?>
-			<button type="submit" class="pdlead-submit wp-element-button"><?php esc_html_e( 'Send', 'pipedrive-lead-forms' ); ?></button>
+			<button type="submit" class="pdlead-submit wp-element-button"><?php echo esc_html( $button_text ); ?></button>
 
 			<div class="pdlead-status" role="status" aria-live="polite" tabindex="-1"></div>
 		</form>
